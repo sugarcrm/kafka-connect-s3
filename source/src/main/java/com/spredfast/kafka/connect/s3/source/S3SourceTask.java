@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Pattern;
 
 import org.apache.kafka.connect.data.SchemaAndValue;
 import org.apache.kafka.connect.errors.ConnectException;
@@ -38,9 +39,12 @@ public class S3SourceTask extends SourceTask {
 	 * @see #remapTopic(String)
 	 */
 	public static final String CONFIG_TARGET_TOPIC = "targetTopic";
+	public static final String CONFIG_TARGET_TOPIC_IGNORE_MISSING = "targetTopicIgnoreMissing";
 	private final AtomicBoolean stopped = new AtomicBoolean();
 
 	private Map<String, String> taskConfig;
+	private Map<String, String> topicMappingConfig;
+	private boolean targetTopicIgnoreMissing = false;
 	private Iterator<S3SourceRecord> reader;
 	private int maxPoll;
 	private final Map<String, String> topicMapping = new HashMap<>();
@@ -58,13 +62,34 @@ public class S3SourceTask extends SourceTask {
 
 	@Override
 	public void start(Map<String, String> taskConfig) {
+		init(taskConfig);
+		readFromStoredOffsets();
+	}
+
+	public void init(Map<String, String> taskConfig) {
 		this.taskConfig = taskConfig;
+		this.topicMappingConfig = getTopicMappingConfig(taskConfig);
+
+		this.targetTopicIgnoreMissing = Boolean.parseBoolean(taskConfig.getOrDefault(CONFIG_TARGET_TOPIC_IGNORE_MISSING, "false"));
+
 		format = Configure.createFormat(taskConfig);
 
 		keyConverter = Optional.ofNullable(Configure.buildConverter(taskConfig, "key.converter", true, null));
 		valueConverter = Configure.buildConverter(taskConfig, "value.converter", false, AlreadyBytesConverter.class);
+	}
 
-		readFromStoredOffsets();
+	public static Map<String, String> getTopicMappingConfig(Map<String, String> config) {
+		Map<String, String> tmConfig = new HashMap<String, String>();
+		for (Map.Entry<String, String> e : config.entrySet()) {
+			if (e.getKey().startsWith(CONFIG_TARGET_TOPIC + ".")) {
+				tmConfig.put(
+					e.getKey().substring(CONFIG_TARGET_TOPIC.length() + 1),
+					e.getValue()
+				);
+			}
+		}
+
+		return tmConfig;
 	}
 
 	private void readFromStoredOffsets() {
@@ -181,6 +206,12 @@ public class S3SourceTask extends SourceTask {
 			S3SourceRecord record = reader.next();
 			updateOffsets(record.file(), record.offset());
 			String topic = topicMapping.computeIfAbsent(record.topic(), this::remapTopic);
+
+			// skip ignored
+			if (topic.equals("")) {
+				continue;
+			}
+
 			// we know the reader returned bytes so, we can cast the key+value and use a converter to
 			// generate the "real" source record
 			Optional<SchemaAndValue> key = keyConverter.map(c -> c.toConnectData(topic, record.key()));
@@ -221,7 +252,17 @@ public class S3SourceTask extends SourceTask {
 	}
 
 	private String remapTopic(String originalTopic) {
-		return taskConfig.getOrDefault(CONFIG_TARGET_TOPIC + "." + originalTopic, originalTopic);
+		for (Map.Entry<String, String> e : topicMappingConfig.entrySet()) {
+			if (Pattern.matches(e.getKey(), originalTopic)) {
+				return e.getValue();
+			}
+		}
+
+		if (targetTopicIgnoreMissing) {
+			return "";
+		}
+
+		return originalTopic;
 	}
 
 	@Override
