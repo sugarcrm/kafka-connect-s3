@@ -183,3 +183,43 @@ Contributions are welcomed! Read the [Contributing Guide](./.github/CONTRIBUTING
 # Licensing
 
 This project is licensed under the BSD License. See [LICENSE](LICENSE.md) for more information.
+
+# Publishing
+
+```sh
+groupId=io.sugarcrm
+artifactId=kafka-connect-s3
+version=1.0.2-all
+repositoryId=cxp-nexus
+mvn -s ~/.m2/settings.xml deploy:deploy-file -DgroupId=${groupId} \
+    -DartifactId=${artifactId} \
+    -Dversion=${version} \
+    -Dpackaging=jar \
+    -Dfile=kafka-connect-s3-${version}.jar \
+    -DgeneratePom=true \
+    -DrepositoryId=${repositoryId} \
+    -Durl=http://nexus.k8s-use1.ea.prod.sugar.build/repository/cxp-public/
+```
+## Settings
+
+```sh
+cat ~/.m2/settings.xml
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+    <localRepository/>
+    <interactiveMode/>
+    <offline/>
+    <pluginGroups/>
+    <servers>
+        <server>
+            <id>cxp-nexus</id>
+            <username>USERNAME</username>
+            <password>PASSWORD</password>
+        </server>
+    </servers>
+    <mirrors/>
+    <proxies/>
+    <profiles/>
+    <activeProfiles/>
+</settings>
+```
