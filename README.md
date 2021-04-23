@@ -183,3 +183,43 @@ These additional configs apply to the Source connector:
 ## Contributing
 
 Pull requests welcome! If you need ideas, check the issues for [open enhancements](https://github.com/spredfast/kafka-connect-s3/issues?q=is%3Aopen+is%3Aissue+label%3Aenhancement).
+
+## Publishing
+
+```sh
+groupId=io.sugarcrm
+artifactId=kafka-connect-s3
+version=1.0.2-all
+repositoryId=cxp-nexus
+mvn -s ~/.m2/settings.xml deploy:deploy-file -DgroupId=${groupId} \
+    -DartifactId=${artifactId} \
+    -Dversion=${version} \
+    -Dpackaging=jar \
+    -Dfile=kafka-connect-s3-${version}.jar \
+    -DgeneratePom=true \
+    -DrepositoryId=${repositoryId} \
+    -Durl=http://nexus.k8s-use1.ea.prod.sugar.build/repository/cxp-public/
+```
+### Settings
+
+```sh
+cat ~/.m2/settings.xml
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+    <localRepository/>
+    <interactiveMode/>
+    <offline/>
+    <pluginGroups/>
+    <servers>
+        <server>
+            <id>cxp-nexus</id>
+            <username>USERNAME</username>
+            <password>PASSWORD</password>
+        </server>
+    </servers>
+    <mirrors/>
+    <proxies/>
+    <profiles/>
+    <activeProfiles/>
+</settings>
+```
