@@ -50,10 +50,6 @@ public abstract class Configure {
 				converter = (Converter) Class.forName(className).newInstance();
 			}
 
-			if (converter instanceof Configurable) {
-				((Configurable) converter).configure(props);
-			}
-
 			// grab any properties intended for the converter
 			Map<String, Object> subKeys = subKeys(classNameProp, props);
 
