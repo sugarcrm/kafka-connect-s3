@@ -194,7 +194,7 @@ public class KafkaIntegrationTests {
 				.put("log.dir", tmpDir.getCanonicalPath())
 				.put("zookeeper.connect", zk.getConnectString())
 				.build(), Functions.toStringFunction()));
-			kafkaServer = new KafkaServer(config, Time.SYSTEM, Option.empty(), JavaConversions.asScalaBuffer(ImmutableList.of()));
+			kafkaServer = new KafkaServer(config, Time.SYSTEM, Option.empty(), false);
 			kafkaServer.startup();
 
 			Properties adminClientProperties = new Properties();
