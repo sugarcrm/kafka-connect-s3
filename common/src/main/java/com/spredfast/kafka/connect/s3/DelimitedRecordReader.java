@@ -75,7 +75,7 @@ public class DelimitedRecordReader implements RecordReader {
 		return true;
 	}
 
-	private static byte[] delimiterBytes(String value, String encoding) throws UnsupportedEncodingException {
+	private static byte[] delimiterBytes(String value, String encoding) {
 		return ofNullable(value).orElse(TrailingDelimiterFormat.DEFAULT_DELIMITER).getBytes(
 			ofNullable(encoding).map(Charset::forName).orElse(TrailingDelimiterFormat.DEFAULT_ENCODING)
 		);

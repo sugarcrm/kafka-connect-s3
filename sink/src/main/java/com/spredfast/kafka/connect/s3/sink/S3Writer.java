@@ -6,6 +6,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
@@ -14,9 +15,7 @@ import java.util.TimeZone;
 
 import com.amazonaws.services.s3.transfer.TransferManagerBuilder;
 import org.apache.kafka.common.TopicPartition;
-import com.amazonaws.auth.profile.ProfileCredentialsProvider;
 import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3Client;
 import com.amazonaws.services.s3.model.AmazonS3Exception;
 import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.amazonaws.services.s3.model.PutObjectRequest;
@@ -39,10 +38,10 @@ import com.spredfast.kafka.connect.s3.json.ChunksIndex;
 public class S3Writer {
 	private static final TimeZone UTC = TimeZone.getTimeZone("UTC");
 	private final ObjectReader reader = new ObjectMapper().readerFor(ChunksIndex.class);
-	private String keyPrefix;
-	private String bucket;
-	private AmazonS3 s3Client;
-	private TransferManager tm;
+	private final String keyPrefix;
+	private final String bucket;
+	private final AmazonS3 s3Client;
+	private final TransferManager tm;
 
 	public S3Writer(String bucket, String keyPrefix, AmazonS3 s3Client) {
 		this(bucket, keyPrefix, s3Client, TransferManagerBuilder.standard().withS3Client(s3Client).build());
@@ -58,7 +57,7 @@ public class S3Writer {
 		this.tm = tm;
 	}
 
-	public long putChunk(String localDataFile, String localIndexFile, TopicPartition tp) throws IOException {
+	public void putChunk(String localDataFile, String localIndexFile, TopicPartition tp) throws IOException {
 		// Put data file then index, then finally update/create the last_index_file marker
 		String dataFileKey = this.getChunkFileKey(localDataFile);
 		String idxFileKey = this.getChunkFileKey(localIndexFile);
@@ -77,8 +76,7 @@ public class S3Writer {
 		this.updateCursorFile(idxFileKey, tp);
 
 		// Sanity check - return what the new nextOffset will be based on the index we just uploaded
-		return nextOffset;
-	}
+  }
 
 	public long fetchOffset(TopicPartition tp) throws IOException {
 
@@ -86,8 +84,8 @@ public class S3Writer {
 		String indexFileKey;
 
 		try (
-			S3Object cursorObj = s3Client.getObject(this.bucket, this.getTopicPartitionLastIndexFileKey(tp));
-			InputStreamReader input = new InputStreamReader(cursorObj.getObjectContent(), "UTF-8");
+      S3Object cursorObj = s3Client.getObject(this.bucket, this.getTopicPartitionLastIndexFileKey(tp));
+      InputStreamReader input = new InputStreamReader(cursorObj.getObjectContent(), StandardCharsets.UTF_8)
 		) {
 			StringBuilder sb = new StringBuilder(1024);
 			final char[] buffer = new char[1024];
@@ -111,8 +109,8 @@ public class S3Writer {
 
 		// Now fetch last written index file...
 		try (
-			S3Object indexObj = s3Client.getObject(this.bucket, indexFileKey);
-			InputStreamReader isr = new InputStreamReader(indexObj.getObjectContent(), "UTF-8");
+      S3Object indexObj = s3Client.getObject(this.bucket, indexFileKey);
+      InputStreamReader isr = new InputStreamReader(indexObj.getObjectContent(), StandardCharsets.UTF_8)
 		) {
 			return getNextOffsetFromIndexFileContents(isr);
 		} catch (Exception e) {
@@ -141,7 +139,7 @@ public class S3Writer {
 
 	private void updateCursorFile(String lastIndexFileKey, TopicPartition tp) throws IOException {
 		try {
-			byte[] contentAsBytes = lastIndexFileKey.getBytes("UTF-8");
+			byte[] contentAsBytes = lastIndexFileKey.getBytes(StandardCharsets.UTF_8);
 			ByteArrayInputStream contentsAsStream = new ByteArrayInputStream(contentAsBytes);
 			ObjectMetadata md = new ObjectMetadata();
 			md.setContentLength(contentAsBytes.length);

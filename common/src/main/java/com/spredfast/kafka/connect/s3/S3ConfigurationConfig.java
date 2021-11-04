@@ -21,7 +21,6 @@ import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
 import com.amazonaws.regions.RegionUtils;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.s3.model.CannedAccessControlList;
-import com.amazonaws.services.s3.model.SSEAlgorithm;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigDef.Importance;
 import org.apache.kafka.common.config.ConfigDef.Type;
@@ -36,7 +35,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import static org.apache.kafka.common.config.ConfigDef.Range.atLeast;
 
@@ -58,15 +56,6 @@ public class S3ConfigurationConfig extends HashMap<String, Object> {
 	public static final String CREDENTIALS_PROVIDER_CLASS_CONFIG = "s3.credentials.provider.class";
 	public static final Class<? extends AWSCredentialsProvider> CREDENTIALS_PROVIDER_CLASS_DEFAULT =
 		DefaultAWSCredentialsProviderChain.class;
-	/**
-	 * The properties that begin with this prefix will be used to configure a class, specified by
-	 * {@code s3.credentials.provider.class} if it implements {@link Configurable}.
-	 */
-	public static final String CREDENTIALS_PROVIDER_CONFIG_PREFIX =
-		CREDENTIALS_PROVIDER_CLASS_CONFIG.substring(
-			0,
-			CREDENTIALS_PROVIDER_CLASS_CONFIG.lastIndexOf(".") + 1
-		);
 
 	public static final String REGION_CONFIG = "s3.region";
 	public static final String REGION_DEFAULT = Regions.DEFAULT_REGION.getName();

@@ -38,8 +38,7 @@ public class S3SinkConnector extends SinkConnector {
 	public List<Map<String, String>> taskConfigs(int maxTasks) {
 		// Sinks are all in the same consumer group, so we can have as many as there are partitions
 		List<Map<String, String>> taskConfigs = new ArrayList<>();
-		Map<String, String> taskProps = new HashMap<>();
-		taskProps.putAll(configProperties);
+    Map<String, String> taskProps = new HashMap<>(configProperties);
 		for (int i = 0; i < maxTasks; i++) {
 			taskConfigs.add(taskProps);
 		}

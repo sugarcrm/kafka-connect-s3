@@ -14,15 +14,15 @@ ext {
   libraries = [:]
 }
 
-versions.awsSdkS3 = '1.11.803'
+versions.awsSdkS3 = '1.11.1034'
 versions.curatorTest = '1.2.6'
-versions.guava = '29.0-jre'
-versions.jackson = '2.10.4'
+versions.guava = '31.0.1-jre'
+versions.jackson = '2.13.0'
 versions.jakartaXml = '2.3.3'
-versions.junit = '4.13'
-versions.kafka = '2.5.1'
-versions.kafkaConnectApi = '2.5.1'
-versions.kafkaConnectRuntime = '2.5.1'
+versions.junit = '4.13.2'
+versions.kafka = '2.8.0'
+versions.kafkaConnectApi = '2.8.0'
+versions.kafkaConnectRuntime = '2.8.0'
 versions.mockito = '3.3.0'
 versions.spotifyDockerClient = '8.16.0'
 

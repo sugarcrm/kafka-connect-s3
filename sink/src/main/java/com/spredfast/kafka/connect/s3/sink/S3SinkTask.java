@@ -7,9 +7,11 @@ import static java.util.stream.Collectors.toList;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
@@ -45,7 +47,7 @@ public class S3SinkTask extends SinkTask {
 
 	private S3Writer s3;
 
-	private Optional<Converter> keyConverter;
+	private Converter keyConverter;
 
 	private Converter valueConverter;
 
@@ -69,7 +71,7 @@ public class S3SinkTask extends SinkTask {
 
 		recordFormat = Configure.createFormat(props);
 
-		keyConverter = ofNullable(Configure.buildConverter(config, "key.converter", true, null));
+		keyConverter = Configure.buildConverter(config, "key.converter", true, AlreadyBytesConverter.class);
 		valueConverter = Configure.buildConverter(config, "value.converter", false, AlreadyBytesConverter.class);
 
 		String bucket = configGet("s3.bucket")
@@ -127,7 +129,7 @@ public class S3SinkTask extends SinkTask {
 		// of the records given to put, so we should just write whatever we have in our files
 		offsets.keySet().stream()
 			.map(partitions::get)
-			.filter(p -> p != null) // TODO error/warn?
+			.filter(Objects::nonNull) // TODO error/warn?
 			.forEach(PartitionWriter::done);
 
 		timer.stop();
@@ -142,7 +144,7 @@ public class S3SinkTask extends SinkTask {
 		// have already flushed, so just ensure the temp files are deleted (in case flush threw an exception)
 		partitions.stream()
 			.map(this.partitions::get)
-			.filter(p -> p != null)
+			.filter(Objects::nonNull)
 			.forEach(PartitionWriter::delete);
 	}
 
@@ -189,8 +191,7 @@ public class S3SinkTask extends SinkTask {
 			metrics.hist(records.size(), "putSize", tags);
 			try (Metrics.StopTimer ignored = metrics.time("writeAll", tags)) {
 				writer.write(format.writeBatch(records.stream().map(record -> new ProducerRecord<>(record.topic(), record.kafkaPartition(),
-					keyConverter.map(c -> c.fromConnectData(record.topic(), record.keySchema(), record.key()))
-						.orElse(null),
+          keyConverter.fromConnectData(record.topic(), record.keySchema(), record.key()),
 					valueConverter.fromConnectData(record.topic(), record.valueSchema(), record.value())
 				))).collect(toList()), records.size());
 			} catch (IOException e) {
@@ -211,7 +212,7 @@ public class S3SinkTask extends SinkTask {
 			Metrics.StopTimer time = metrics.time("s3Put", tags);
 			try {
 				if (!finished) {
-					writer.write(Arrays.asList(format.finish(tp.topic(), tp.partition())), 0);
+					writer.write(Collections.singletonList(format.finish(tp.topic(), tp.partition())), 0);
 					finished = true;
 				}
 				if (!closed) {

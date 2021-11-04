@@ -42,7 +42,7 @@ public class S3 {
 
 		ClientConfiguration clientConfiguration = PredefinedClientConfigurations.defaultConfig();
 		clientConfiguration.withUserAgentPrefix("Spredfast Kafka-S3 Connect / 1.0");
-		clientConfiguration.withUseExpectContinue(Boolean.valueOf(config.getString(HEADERS_USE_EXPECT_CONTINUE_CONFIG)));
+		clientConfiguration.withUseExpectContinue(Boolean.parseBoolean(config.getString(HEADERS_USE_EXPECT_CONTINUE_CONFIG)));
 		return clientConfiguration;
 	}
 

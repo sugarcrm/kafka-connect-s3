@@ -2,6 +2,9 @@ package com.spredfast.kafka.connect.s3.source;
 
 import static java.util.stream.Collectors.toList;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -18,6 +21,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
 
+import com.amazonaws.AmazonServiceException;
+import com.amazonaws.services.s3.transfer.Download;
+import com.amazonaws.services.s3.transfer.TransferManager;
+import com.amazonaws.services.s3.transfer.TransferManagerBuilder;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,12 +75,19 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 
 	private final S3SourceConfig config;
 
+  private final TransferManager tm;
+
 	public S3FilesReader(S3SourceConfig config, AmazonS3 s3Client, Map<S3Partition, S3Offset> offsets, Supplier<S3RecordsReader> recordReader) {
-		this.config = config;
-		this.offsets = Optional.ofNullable(offsets).orElseGet(HashMap::new);
-		this.s3Client = s3Client;
-		this.makeReader = recordReader;
+    this(config, s3Client, offsets, recordReader, TransferManagerBuilder.standard().withS3Client(s3Client).build());
 	}
+
+  public S3FilesReader(S3SourceConfig config, AmazonS3 s3Client, Map<S3Partition, S3Offset> offsets, Supplier<S3RecordsReader> recordReader, TransferManager tm) {
+    this.config = config;
+    this.offsets = Optional.ofNullable(offsets).orElseGet(HashMap::new);
+    this.s3Client = s3Client;
+    this.makeReader = recordReader;
+    this.tm = tm;
+  }
 
 	public Iterator<S3SourceRecord> iterator() {
 		return readAll();
@@ -189,9 +203,11 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 					} else {
 						log.debug("Now reading from {}", currentKey);
 						S3RecordsReader reader = makeReader.get();
-						InputStream content = getContent(s3Client.getObject(config.bucket, currentKey));
+
+            InputStream content = getContent(currentKey);
+//            InputStream content = getContent(s3Client.getObject(config.bucket, currentKey));
 						iterator = parseKey(currentKey, (topic, partition, startOffset) -> {
-							reader.init(topic,partition, content, startOffset);
+							reader.init(topic, partition, content, startOffset);
 							return reader.readAll(topic, partition, content, startOffset);
 						});
 					}
@@ -203,6 +219,48 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 			private InputStream getContent(S3Object object) throws IOException {
 				return config.inputFilter.filter(object.getObjectContent());
 			}
+
+      private InputStream getContent(InputStream content) throws IOException {
+        return config.inputFilter.filter(content);
+      }
+
+      private InputStream getContent(String s3key) throws IOException {
+        File tmpFile = File.createTempFile(s3key, null);
+        try {
+          Download operation = tm.download(config.bucket, s3key, tmpFile);
+          operation.waitForCompletion();
+        } catch (AmazonServiceException e) {
+          System.err.println("Amazon service error: " + e.getMessage());
+          System.exit(1);
+        } catch (AmazonClientException e) {
+          System.err.println("Amazon client error: " + e.getMessage());
+          System.exit(1);
+        } catch (InterruptedException e) {
+          System.err.println("Transfer interrupted: " + e.getMessage());
+          System.exit(1);
+        }
+
+        return getContent(new DeleteOnCloseFileInputStream(tmpFile));
+      }
+
+      private InputStream getContent(GetObjectRequest request) throws IOException {
+        File tmpFile = File.createTempFile(request.getKey(), null);
+        try {
+          Download operation = tm.download(request, tmpFile);
+          operation.waitForCompletion();
+        } catch (AmazonServiceException e) {
+          System.err.println("Amazon service error: " + e.getMessage());
+          System.exit(1);
+        } catch (AmazonClientException e) {
+          System.err.println("Amazon client error: " + e.getMessage());
+          System.exit(1);
+        } catch (InterruptedException e) {
+          System.err.println("Transfer interrupted: " + e.getMessage());
+          System.exit(1);
+        }
+
+        return getContent(new DeleteOnCloseFileInputStream(tmpFile));
+      }
 
 			private S3Offset offset(S3ObjectSummary chunk) {
 				return offsets.get(S3Partition.from(config.bucket, config.keyPrefix, topic(chunk.getKey()), partition(chunk.getKey())));
@@ -335,5 +393,25 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 
 		InputFilter GUNZIP = GZIPInputStream::new;
 	}
+
+  private static class DeleteOnCloseFileInputStream extends FileInputStream {
+    private File file;
+    public DeleteOnCloseFileInputStream(File file) throws FileNotFoundException {
+      super(file);
+      this.file = file;
+    }
+
+    @Override
+    public void close() throws IOException {
+      try {
+        super.close();
+      } finally {
+        if (file != null) {
+          file.delete();
+          file = null;
+        }
+      }
+    }
+  }
 
 }

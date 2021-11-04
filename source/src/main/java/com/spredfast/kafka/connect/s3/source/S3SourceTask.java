@@ -4,7 +4,6 @@ import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toMap;
 import static java.util.stream.Collectors.toSet;
 
-import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -16,6 +15,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.connect.data.SchemaAndValue;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceRecord;
@@ -45,7 +45,7 @@ public class S3SourceTask extends SourceTask {
 	private int maxPoll;
 	private final Map<String, String> topicMapping = new HashMap<>();
 	private S3RecordFormat format;
-	private Optional<Converter> keyConverter;
+	private Converter keyConverter;
 	private Converter valueConverter;
 	private long s3PollInterval = 10_000L;
 	private long errorBackoff = 1000L;
@@ -61,7 +61,7 @@ public class S3SourceTask extends SourceTask {
 		this.taskConfig = taskConfig;
 		format = Configure.createFormat(taskConfig);
 
-		keyConverter = Optional.ofNullable(Configure.buildConverter(taskConfig, "key.converter", true, null));
+    keyConverter = Configure.buildConverter(taskConfig, "key.converter", true, AlreadyBytesConverter.class);
 		valueConverter = Configure.buildConverter(taskConfig, "value.converter", false, AlreadyBytesConverter.class);
 
 		readFromStoredOffsets();
@@ -75,7 +75,7 @@ public class S3SourceTask extends SourceTask {
 		}
 	}
 
-	private void tryReadFromStoredOffsets() throws UnsupportedEncodingException {
+	private void tryReadFromStoredOffsets() {
 		String bucket = configGet("s3.bucket").orElseThrow(() -> new ConnectException("No bucket configured!"));
 		String prefix = configGet("s3.prefix").orElse("");
 
@@ -183,11 +183,11 @@ public class S3SourceTask extends SourceTask {
 			String topic = topicMapping.computeIfAbsent(record.topic(), this::remapTopic);
 			// we know the reader returned bytes so, we can cast the key+value and use a converter to
 			// generate the "real" source record
-			Optional<SchemaAndValue> key = keyConverter.map(c -> c.toConnectData(topic, record.key()));
+			SchemaAndValue key = keyConverter.toConnectData(topic, record.key());
 			SchemaAndValue value = valueConverter.toConnectData(topic, record.value());
 			results.add(new SourceRecord(record.file().asMap(), record.offset().asMap(), topic,
 				record.partition(),
-				key.map(SchemaAndValue::schema).orElse(null), key.map(SchemaAndValue::value).orElse(null),
+				key.schema(), key.value(),
 				value.schema(), value.value()));
 		}
 
@@ -207,14 +207,16 @@ public class S3SourceTask extends SourceTask {
 	}
 
 	@Override
-	public void commit() throws InterruptedException {
+	public void commit() {
 		log.debug("{} Commit offsets {}", name(), offsets);
 	}
 
-	@Override
-	public void commitRecord(SourceRecord record) throws InterruptedException {
-		log.debug("{} Commit record w/ offset {}", name(), record.sourceOffset());
-	}
+  @Override
+  public void commitRecord(SourceRecord record, RecordMetadata metadata)
+    throws InterruptedException {
+    log.debug("{} Commit record w/ offset {}", name(), record.sourceOffset());
+    super.commitRecord(record, metadata);
+  }
 
 	private String name() {
 		return configGet("name").orElse("???");

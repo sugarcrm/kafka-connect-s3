@@ -89,8 +89,8 @@ public class BytesRecordReader implements RecordReader {
 	}
 
 
-	protected ConsumerRecord<byte[], byte[]> die(String topic, int partition, long offset) {
-		throw new DataException(String.format("Corrupt record at %s-%d:%d", topic, partition, offset));
+	protected void die(String topic, int partition, long offset) {
+    throw new DataException(String.format("Corrupt record at %s-%d:%d", topic, partition, offset));
 	}
 
 }
