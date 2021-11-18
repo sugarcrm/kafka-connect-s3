@@ -3,10 +3,11 @@ package com.spredfast.kafka.connect.s3;
 import static java.util.Optional.ofNullable;
 
 import java.io.BufferedInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.Charset;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.Optional;
 
@@ -20,13 +21,33 @@ public class DelimitedRecordReader implements RecordReader {
 
 	private final Optional<byte[]> keyDelimiter;
 
+	private final static int DEFAULT_BUFFER_SIZE = 32 * 1024 * 1024;
+
+	private byte[] buf1;
+	private byte[] buf2;
+	private int bufLen = 0;
+	private int bufPos = 0;
+	private InputStream in;
+
 	public DelimitedRecordReader(byte[] valueDelimiter, Optional<byte[]> keyDelimiter) {
+		this(valueDelimiter, keyDelimiter, DEFAULT_BUFFER_SIZE);
+	}
+
+	public DelimitedRecordReader(byte[] valueDelimiter, Optional<byte[]> keyDelimiter, int bufferSize) {
 		this.valueDelimiter = valueDelimiter;
 		this.keyDelimiter = keyDelimiter;
+		buf1 = new byte[bufferSize];
+		buf2 = new byte[bufferSize];
 	}
 
 	@Override
 	public ConsumerRecord<byte[], byte[]> read(String topic, int partition, long offset, BufferedInputStream data) throws IOException {
+		if (in == null) {
+			in = data;
+		} else if (in != data) {
+			throw new RuntimeException("Input stream object has changed");
+		}
+
 		Optional<byte[]> key = Optional.empty();
 		if (keyDelimiter.isPresent()) {
 			key = Optional.ofNullable(readTo(data, keyDelimiter.get()));
@@ -46,33 +67,57 @@ public class DelimitedRecordReader implements RecordReader {
 		);
 	}
 
-	// read up to and including the given multi-byte delimeter
-	private byte[] readTo(BufferedInputStream data, byte[] del) throws IOException {
-		ByteArrayOutputStream baos = new ByteArrayOutputStream();
-		int lastByte = del[del.length - 1] & 0xff;
-		int b;
-		while((b = data.read()) != -1) {
-			baos.write(b);
-			if (b == lastByte && baos.size() >= del.length) {
-				byte[] bytes = baos.toByteArray();
-				if (endsWith(bytes, del)) {
-					byte[] undelimited = new byte[bytes.length - del.length];
-					System.arraycopy(bytes, 0, undelimited, 0, undelimited.length);
-					return undelimited;
+	private byte[] readTo(InputStream in, byte[] del) throws IOException {
+		int delPos = indexOf(buf1, del, bufPos, bufLen);
+
+		if (delPos == -1) {
+			System.arraycopy(buf1, bufPos, buf2, 0, bufLen - bufPos);
+			bufLen = bufLen - bufPos;
+			bufPos = 0;
+
+			while (bufLen < buf2.length) {
+				int read = in.read(buf2, bufLen, buf2.length - bufLen);
+				if (read == -1) {
+					if (bufLen == 0) {
+						return null;
+					}
+					break;
 				}
+				bufLen += read;
+			}
+
+			byte[] tmp = buf2;
+			buf2 = buf1;
+			buf1 = tmp;
+
+			delPos = indexOf(buf1, del, bufPos, bufLen);
+		}
+
+		if (delPos == -1) {
+			if (buf1.length == bufLen) {
+				throw new RuntimeException("Couldn't find the delimiter although the buffer is full. " +
+					"This might mean that a single message doesn't fit to the buffer and you need to increase the buffer size");
+			} else {
+				throw new RuntimeException("Couldn't find the delimiter while the buffer is not filled completely from the input stream");
 			}
 		}
-		// if we got here, we got EOF before we got the delimiter
-		return (baos.size() == 0) ? null : baos.toByteArray();
+
+		byte[] result = Arrays.copyOfRange(buf1, bufPos, delPos);
+		bufPos = delPos + del.length;
+		return result;
 	}
 
-	private boolean endsWith(byte[] bytes, byte[] suffix) {
-		for (int i = 0; i < suffix.length; i++) {
-			if (bytes[bytes.length - suffix.length + i] != suffix[i]) {
-				return false;
+	private int indexOf(byte[] buff, byte[] del, int from, int to) {
+		outer:
+		for (int i = from; i <= to - del.length; i++) {
+			for (int j = 0; j < del.length; j++) {
+				if (buff[i + j] != del[j]) {
+					continue outer;
+				}
 			}
+			return i;
 		}
-		return true;
+		return -1;
 	}
 
 	private static byte[] delimiterBytes(String value, String encoding) throws UnsupportedEncodingException {
