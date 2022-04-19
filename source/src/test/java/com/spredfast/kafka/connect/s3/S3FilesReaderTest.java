@@ -68,6 +68,19 @@ public class S3FilesReaderTest {
 		thenTheyAreFilteredAndInOrder(results);
 	}
 
+	@Test
+	public void testExcludingByMessageKey() throws IOException {
+		final Path dir = Files.createTempDirectory("s3FilesReaderTest");
+		givenSomeData(dir);
+
+		final AmazonS3 client = givenAMockS3Client(dir);
+
+		List<String> results = whenTheRecordsAreRead(client, Arrays.asList("1-0", "ololo"));
+		assertEquals(Arrays.asList(
+			"key0-0=value0-0",
+			"key1-1=value1-1"
+		), results);
+	}
 
 	@Test
 	public void testReadingBytesFromS3_multiPartition() throws IOException {
@@ -133,7 +146,7 @@ public class S3FilesReaderTest {
 		offsets.put(S3Partition.from("bucket", "prefix", "topic", partInt),
 			S3Offset.from(marker, nextOffset - 1 /* an S3 offset is the last record processed, so go back 1 to consume next */));
 		return new S3FilesReader(new S3SourceConfig("bucket", "prefix", 1, null, S3FilesReader.DEFAULT_PATTERN, S3FilesReader.InputFilter.GUNZIP,
-			p -> partInt == p), client, offsets, () -> new BytesRecordReader(true));
+			p -> partInt == p, null), client, offsets, () -> new BytesRecordReader(true));
 	}
 
 	public static class ReversedStringBytesConverter implements Converter {
@@ -201,8 +214,14 @@ public class S3FilesReaderTest {
 		return whenTheRecordsAreRead(client, fileIncludesKeys, 1);
 	}
 
+	private List<String> whenTheRecordsAreRead(AmazonS3 client, List<String> messageKeyExcludeList) {
+		S3SourceConfig config = new S3SourceConfig("bucket", "prefix", 3, "prefix/2016-01-01", S3FilesReader.DEFAULT_PATTERN, S3FilesReader.InputFilter.GUNZIP, null, messageKeyExcludeList);
+		S3FilesReader reader = new S3FilesReader(config, client, null,() -> new BytesRecordReader(true));
+		return whenTheRecordsAreRead(reader);
+	}
+
 	private List<String> whenTheRecordsAreRead(AmazonS3 client, boolean fileIncludesKeys, int pageSize) {
-		S3FilesReader reader = new S3FilesReader(new S3SourceConfig("bucket", "prefix", pageSize, "prefix/2016-01-01", S3FilesReader.DEFAULT_PATTERN, S3FilesReader.InputFilter.GUNZIP, null), client, null,() -> new BytesRecordReader(fileIncludesKeys));
+		S3FilesReader reader = new S3FilesReader(new S3SourceConfig("bucket", "prefix", pageSize, "prefix/2016-01-01", S3FilesReader.DEFAULT_PATTERN, S3FilesReader.InputFilter.GUNZIP, null, null), client, null,() -> new BytesRecordReader(fileIncludesKeys));
 		return whenTheRecordsAreRead(reader);
 	}
 

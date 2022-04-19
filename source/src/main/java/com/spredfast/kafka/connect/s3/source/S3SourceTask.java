@@ -125,7 +125,10 @@ public class S3SourceTask extends SourceTask {
 			S3FilesReader.InputFilter.GUNZIP,
 			S3FilesReader.PartitionFilter.from((topic, partition) ->
 				(topics.isEmpty() || topics.contains(topic))
-				&& partitionNumbers.contains(partition))
+				&& partitionNumbers.contains(partition)),
+			configGet("message.key.exclude.list")
+				.map(s -> Arrays.stream(s.split(",")).map(String::trim).collect(toList()))
+				.orElse(null)
 		);
 
 		log.debug("{} reading from S3 with offsets {}", name(), offsets);
