@@ -123,7 +123,7 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 	}
 
 	public Iterator<S3SourceRecord> readAll() {
-		return new Iterator<S3SourceRecord>() {
+		Iterator<S3SourceRecord> iterator = new Iterator<S3SourceRecord>() {
 			String currentKey;
 
 			ObjectListing objectListing;
@@ -290,6 +290,49 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 				throw new UnsupportedOperationException();
 			}
 		};
+
+		if (config.messageKeyExcludeList != null) {
+			iterator = new Iterator<S3SourceRecord>() {
+				private S3SourceRecord next;
+				private Iterator<S3SourceRecord> parentIterator;
+
+				private Iterator<S3SourceRecord> init(Iterator<S3SourceRecord> parentIterator) {
+					this.parentIterator = parentIterator;
+					prepareNext();
+					return this;
+				}
+
+				private void prepareNext() {
+					next = null;
+					while(parentIterator.hasNext()) {
+						S3SourceRecord candidate = parentIterator.next();
+						if (recordShouldBeProduced(candidate)) {
+							next = candidate;
+							break;
+						}
+					}
+				}
+
+				private boolean recordShouldBeProduced(S3SourceRecord record) {
+					String key = new String(record.key());
+					return config.messageKeyExcludeList.stream().noneMatch(key::contains);
+				}
+
+				@Override
+				public boolean hasNext() {
+					return next != null;
+				}
+
+				@Override
+				public S3SourceRecord next() {
+					S3SourceRecord result = next;
+					prepareNext();
+					return result;
+				}
+			}.init(iterator);
+		}
+
+		return iterator;
 	}
 
 	private <T> T parseKeyUnchecked(String key, QuietKeyConsumer<T> consumer) {

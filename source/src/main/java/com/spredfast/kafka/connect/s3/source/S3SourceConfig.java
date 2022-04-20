@@ -1,5 +1,6 @@
 package com.spredfast.kafka.connect.s3.source;
 
+import java.util.List;
 import java.util.regex.Pattern;
 
 public class S3SourceConfig {
@@ -10,12 +11,13 @@ public class S3SourceConfig {
 	public Pattern keyPattern = S3FilesReader.DEFAULT_PATTERN;
 	public S3FilesReader.InputFilter inputFilter = S3FilesReader.InputFilter.GUNZIP;
 	public S3FilesReader.PartitionFilter partitionFilter = S3FilesReader.PartitionFilter.MATCH_ALL;
+	public List<String> messageKeyExcludeList;
 
 	public S3SourceConfig(String bucket) {
 		this.bucket = bucket;
 	}
 
-	public S3SourceConfig(String bucket, String keyPrefix, int pageSize, String startMarker, Pattern keyPattern, S3FilesReader.InputFilter inputFilter, S3FilesReader.PartitionFilter partitionFilter) {
+	public S3SourceConfig(String bucket, String keyPrefix, int pageSize, String startMarker, Pattern keyPattern, S3FilesReader.InputFilter inputFilter, S3FilesReader.PartitionFilter partitionFilter, List<String> messageKeyExcludeList) {
 		this.bucket = bucket;
 		this.keyPrefix = keyPrefix;
 		this.pageSize = pageSize;
@@ -27,5 +29,6 @@ public class S3SourceConfig {
 		if (partitionFilter != null) {
 			this.partitionFilter = partitionFilter;
 		}
+		this.messageKeyExcludeList = messageKeyExcludeList;
 	}
 }
