@@ -20,6 +20,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +33,7 @@ import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaAndValue;
 import org.apache.kafka.connect.storage.Converter;
 import org.junit.Test;
+import org.mockito.internal.util.reflection.FieldSetter;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 import com.amazonaws.AmazonServiceException;
@@ -57,7 +59,7 @@ import com.spredfast.kafka.connect.s3.source.S3SourceRecord;
 public class S3FilesReaderTest {
 
 	@Test
-	public void testReadingBytesFromS3() throws IOException {
+	public void testReadingBytesFromS3() throws IOException, NoSuchFieldException {
 		final Path dir = Files.createTempDirectory("s3FilesReaderTest");
 		givenSomeData(dir);
 
@@ -69,7 +71,7 @@ public class S3FilesReaderTest {
 	}
 
 	@Test
-	public void testExcludingByMessageKey() throws IOException {
+	public void testExcludingByMessageKey() throws IOException, NoSuchFieldException {
 		final Path dir = Files.createTempDirectory("s3FilesReaderTest");
 		givenSomeData(dir);
 
@@ -83,7 +85,7 @@ public class S3FilesReaderTest {
 	}
 
 	@Test
-	public void testReadingBytesFromS3_multiPartition() throws IOException {
+	public void testReadingBytesFromS3_multiPartition() throws IOException, NoSuchFieldException {
 		// scenario: multiple partition files at the end of a listing, page size >  # of files
 		// do we read all of them?
 		final Path dir = Files.createTempDirectory("s3FilesReaderTest");
@@ -97,7 +99,7 @@ public class S3FilesReaderTest {
 	}
 
 	@Test
-	public void testReadingBytesFromS3_withOffsets() throws IOException {
+	public void testReadingBytesFromS3_withOffsets() throws IOException, NoSuchFieldException {
 		final Path dir = Files.createTempDirectory("s3FilesReaderTest");
 		givenSomeData(dir);
 
@@ -117,7 +119,7 @@ public class S3FilesReaderTest {
 
 
 	@Test
-	public void testReadingBytesFromS3_withOffsetsAtEndOfFile() throws IOException {
+	public void testReadingBytesFromS3_withOffsetsAtEndOfFile() throws IOException, NoSuchFieldException {
 		final Path dir = Files.createTempDirectory("s3FilesReaderTest");
 		givenSomeData(dir);
 
@@ -173,7 +175,7 @@ public class S3FilesReaderTest {
 	}
 
 	@Test
-	public void testReadingBytesFromS3_withoutKeys() throws IOException {
+	public void testReadingBytesFromS3_withoutKeys() throws IOException, NoSuchFieldException {
 		final Path dir = Files.createTempDirectory("s3FilesReaderTest");
 		givenSomeData(dir, false);
 
@@ -233,8 +235,14 @@ public class S3FilesReaderTest {
 		return results;
 	}
 
-	private AmazonS3 givenAMockS3Client(final Path dir) {
+	private AmazonS3 givenAMockS3Client(final Path dir) throws NoSuchFieldException {
 		final AmazonS3 client = mock(AmazonS3Client.class);
+		// The aws-java-sdk v1.11+ calls a protected method beforeClientExecution that causes an exception
+		// due to the requestHandler2s member variable of an abstract super class being null when mocked.
+		// Since we aren't testing beforeClientExecution, default the member to an empty list to allow the
+		// test to proceed.
+		FieldSetter.setField(client, AmazonS3Client.class.getSuperclass().getDeclaredField("requestHandler2s"), Collections.emptyList());
+
 		when(client.listObjects(any(ListObjectsRequest.class))).thenAnswer(new Answer<ObjectListing>() {
 			@Override
 			public ObjectListing answer(InvocationOnMock invocationOnMock) throws Throwable {
