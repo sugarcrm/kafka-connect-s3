@@ -131,7 +131,7 @@ public class S3SourceTask extends SourceTask {
 				.orElse(null)
 		);
 
-		log.debug("{} reading from S3 with offsets {}", name(), offsets);
+		log.debug("Reading from S3 with offsets {}", offsets);
 
 		reader = new S3FilesReader(config, client, offsets, format::newReader).readAll();
 	}
@@ -194,7 +194,7 @@ public class S3SourceTask extends SourceTask {
 				value.schema(), value.value()));
 		}
 
-		log.debug("{} returning {} records.", name(), results.size());
+		log.debug("Returning {} records", results.size());
 		return results;
 	}
 
@@ -202,7 +202,7 @@ public class S3SourceTask extends SourceTask {
 		// store the larger offset. we don't read out of order (could probably get away with always writing what we are handed)
 		S3Offset current = offsets.getOrDefault(file, offset);
 		if (current.compareTo(offset) < 0) {
-			log.debug("{} updated offset for {} to {}", name(), file, offset);
+			log.debug("Updated offset for {} to {}", file, offset);
 			offsets.put(file, offset);
 		} else {
 			offsets.put(file, current);
@@ -210,17 +210,13 @@ public class S3SourceTask extends SourceTask {
 	}
 
 	@Override
-	public void commit() throws InterruptedException {
-		log.debug("{} Commit offsets {}", name(), offsets);
+	public void commit() {
+		log.debug("Committing offsets {}", offsets);
 	}
 
 	@Override
-	public void commitRecord(SourceRecord record) throws InterruptedException {
-		log.debug("{} Commit record w/ offset {}", name(), record.sourceOffset());
-	}
-
-	private String name() {
-		return configGet("name").orElse("???");
+	public void commitRecord(SourceRecord record) {
+		log.debug("Committing record w/ offset {}", record.sourceOffset());
 	}
 
 	private String remapTopic(String originalTopic) {
