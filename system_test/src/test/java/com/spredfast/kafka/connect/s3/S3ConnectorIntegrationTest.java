@@ -135,7 +135,7 @@ public class S3ConnectorIntegrationTest {
 
 	private void whenTheSinkIsStopped(String name) {
 		connect.herder().putConnectorConfig(name, null, true,
-			(e, c) -> { if (e != null) Throwables.propagate(e); });
+			(e, c) -> { if (e != null) Throwables.throwIfUnchecked(e); });
 	}
 
 	// this seems to take at least 20 seconds to get a segment deleted :(
@@ -357,7 +357,7 @@ public class S3ConnectorIntegrationTest {
 			try {
 				producer.send(new ProducerRecord<>(originalTopic, i % 2, "key:" + i, "value:" + i)).get(5, TimeUnit.SECONDS);
 			} catch (Exception e) {
-				throw Throwables.propagate(e);
+				throw new RuntimeException(e);
 			}
 		});
 	}

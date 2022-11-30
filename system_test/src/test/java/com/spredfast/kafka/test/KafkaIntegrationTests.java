@@ -31,8 +31,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import com.google.common.io.Files;
-import com.netflix.curator.test.InstanceSpec;
-import com.netflix.curator.test.TestingServer;
+import org.apache.curator.test.InstanceSpec;
+import org.apache.curator.test.TestingServer;
 
 import kafka.admin.AdminUtils;
 import kafka.server.KafkaConfig;
@@ -78,10 +78,10 @@ public class KafkaIntegrationTests {
 				try {
 					Thread.sleep(SLEEP_INTERVAL);
 				} catch (InterruptedException e1) {
-					Throwables.propagate(e1);
+					Throwables.throwIfUnchecked(e1);
 				}
 			} catch (Exception e) {
-				Throwables.propagate(e);
+				Throwables.throwIfUnchecked(e);
 			}
 		}
 		if (last != null) {

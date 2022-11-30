@@ -3,6 +3,6 @@ description = "Kafka Connect Sink that writes to S3"
 dependencies {
     implementation project(':common')
 
-    testImplementation group: 'junit', name: 'junit', version: '4.12'
-    testImplementation group: 'org.mockito', name: 'mockito-core', version: '2.23.4'
+    testImplementation group: 'junit', name: 'junit', version: '4.13.2'
+    testImplementation group: 'org.mockito', name: 'mockito-core', version: '4.9.0'
 }

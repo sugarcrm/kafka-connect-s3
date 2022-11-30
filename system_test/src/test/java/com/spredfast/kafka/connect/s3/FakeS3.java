@@ -8,7 +8,7 @@ import java.nio.file.attribute.FileAttribute;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.netflix.curator.test.InstanceSpec;
+import org.apache.curator.test.InstanceSpec;
 import com.spotify.docker.client.DockerClient;
 import com.spotify.docker.client.exceptions.DockerException;
 import com.spotify.docker.client.messages.ContainerConfig;
