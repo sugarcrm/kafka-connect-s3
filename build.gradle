@@ -1,32 +1,33 @@
 buildscript {
 	repositories {
-		jcenter()
+		mavenCentral()
 	}
 	dependencies {
-		classpath 'com.github.jengelman.gradle.plugins:shadow:4.0.2'
-		classpath "io.codearte.gradle.nexus:gradle-nexus-staging-plugin:0.21.0"
+		classpath "gradle.plugin.com.github.johnrengelman:shadow:7.1.2"
+		classpath "io.codearte.gradle.nexus:gradle-nexus-staging-plugin:0.30.0"
 	}
 }
 
 plugins {
-	id 'com.palantir.git-version' version '0.5.2'
+	id 'com.palantir.git-version' version '0.15.0'
+	id 'java-library'
 }
 
-apply plugin: 'java'
+apply plugin: 'java-library'
 apply plugin: 'io.codearte.nexus-staging'
 
 description = "kafka-connect-s3"
 
 allprojects  {
-  apply plugin: 'maven'
+  apply plugin: 'maven-publish'
   apply plugin: 'idea'
 
   group = 'com.spredfast.kafka.connect.s3'
-  version = '1.0.7'
+  version = '1.0.8'
 
-  apply plugin: 'java'
-  sourceCompatibility = 1.8
-  targetCompatibility = 1.8
+  apply plugin: 'java-library'
+  sourceCompatibility = 11
+  targetCompatibility = 11
 
   repositories {
     maven { url "https://repo.maven.apache.org/maven2" }
@@ -54,18 +55,18 @@ shadowJar {
 }
 
 dependencies {
-	compile project(':sink')
-	compile project(':source')
+	implementation project(':sink')
+	implementation project(':source')
 }
 
 task javadocJar(type: Jar, dependsOn: javadoc) {
-	classifier = 'javadoc'
+	archiveClassifier.set('javadoc')
 	from subprojects*.tasks.javadoc.destinationDir
 }
 
 task sourcesJar(type: Jar) {
 	from subprojects*.sourceSets.main.allSource
-	classifier = 'sources'
+	archiveClassifier.set('sources')
 }
 
 jar {
@@ -81,4 +82,5 @@ ext {
 	pomDesc = 'S3 Source and Sink Connectors for Kafka Connect'
 }
 
-apply from: 'upload.gradle'
+// TODO: Rewrite upload.gradle to use the maven-publish plugin
+// apply from: 'upload.gradle'
