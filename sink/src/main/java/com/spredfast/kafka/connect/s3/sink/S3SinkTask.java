@@ -46,6 +46,8 @@ public class S3SinkTask extends SinkTask {
 
 	private long GZIPChunkThreshold = 67108864;
 
+	private long GZIPThreshold =     104857600;
+
 	private S3Writer s3;
 
 	private Optional<Converter> keyConverter;
@@ -69,6 +71,9 @@ public class S3SinkTask extends SinkTask {
 
 		configGet("compressed_block_size").map(Long::parseLong).ifPresent(chunkThreshold ->
 			this.GZIPChunkThreshold = chunkThreshold);
+
+		configGet("compressed_file_size").map(Long::parseLong).ifPresent(gzipThreshold ->
+			this.GZIPThreshold = gzipThreshold);
 
 		recordFormat = Configure.createFormat(props);
 
@@ -108,6 +113,31 @@ public class S3SinkTask extends SinkTask {
 	}
 
 	@Override
+	public Map<TopicPartition, OffsetAndMetadata> preCommit(
+		Map<TopicPartition, OffsetAndMetadata> currentOffsets) {
+		Map<TopicPartition, OffsetAndMetadata> result = new HashMap<>();
+
+		log.info("{} performing preCommit", name());
+		log.info("{} offsets: {}", name(), currentOffsets);
+		log.info("{} compressed_file_size: {}", name(), GZIPThreshold);
+
+		partitions.entrySet().stream()
+			.filter(e -> e.getValue() != null && e.getValue().getWriter() != null && e.getValue().getWriter().getTotalCompressedSize() > GZIPThreshold)
+			.forEach(e -> {
+				BlockGZIPFileWriter blockWriter = e.getValue().getWriter();
+				log.info("{} partition: {}, totalCompressedSize: {}", name(), e.getValue(), blockWriter.getTotalCompressedSize());
+				result.put(e.getKey(), currentOffsets.get(e.getKey()));
+			});
+
+		if (!result.isEmpty()) {
+			log.info("{} result: {}", name(), result);
+			flush(result);
+		}
+
+		return result;
+	}
+
+	@Override
 	public void put(Collection<SinkRecord> records) throws ConnectException {
 		records.stream().collect(groupingBy(record -> new TopicPartition(record.topic(), record.kafkaPartition()))).forEach((tp, rs) -> {
 			long firstOffset = rs.get(0).kafkaOffset();
@@ -126,7 +156,7 @@ public class S3SinkTask extends SinkTask {
 	public void flush(Map<TopicPartition, OffsetAndMetadata> offsets) throws ConnectException {
 		Metrics.StopTimer timer = metrics.time("flush", tags);
 
-		log.debug("{} flushing offsets", name());
+		log.info("{} flushing offsets", name());
 
 		// XXX the docs for flush say that the offsets given are the same as if we tracked the offsets
 		// of the records given to put, so we should just write whatever we have in our files
@@ -191,6 +221,10 @@ public class S3SinkTask extends SinkTask {
 			this.tags = writerTags;
 
 			writer = new BlockGZIPFileWriter(directory, firstOffset, GZIPChunkThreshold, format.init(tp.topic(), tp.partition(), firstOffset));
+		}
+
+		public BlockGZIPFileWriter getWriter() {
+			return writer;
 		}
 
 		private void writeAll(Collection<SinkRecord> records) {
