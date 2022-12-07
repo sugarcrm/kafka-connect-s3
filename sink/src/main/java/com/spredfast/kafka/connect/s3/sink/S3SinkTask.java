@@ -44,6 +44,8 @@ public class S3SinkTask extends SinkTask {
 
   private long GZIPChunkThreshold = 67108864;
 
+  private long GZIPThreshold = 104857600;
+
   private S3Writer s3;
 
   private Optional<Converter> keyConverter;
@@ -68,6 +70,10 @@ public class S3SinkTask extends SinkTask {
     configGet("compressed_block_size")
         .map(Long::parseLong)
         .ifPresent(chunkThreshold -> this.GZIPChunkThreshold = chunkThreshold);
+
+    configGet("compressed_file_size")
+        .map(Long::parseLong)
+        .ifPresent(gzipThreshold -> this.GZIPThreshold = gzipThreshold);
 
     recordFormat = Configure.createFormat(props);
 
@@ -105,6 +111,40 @@ public class S3SinkTask extends SinkTask {
       log.debug("{} Stopping - Deleting temp file {}", name(), writer.getDataFile());
       writer.delete();
     }
+  }
+
+  @Override
+  public Map<TopicPartition, OffsetAndMetadata> preCommit(
+      Map<TopicPartition, OffsetAndMetadata> currentOffsets) {
+    Map<TopicPartition, OffsetAndMetadata> result = new HashMap<>();
+
+    log.info("{} performing preCommit", name());
+    log.info("{} offsets: {}", name(), currentOffsets);
+    log.info("{} compressed_file_size: {}", name(), GZIPThreshold);
+
+    partitions.entrySet().stream()
+        .filter(
+            e ->
+                e.getValue() != null
+                    && e.getValue().getWriter() != null
+                    && e.getValue().getWriter().getTotalCompressedSize() > GZIPThreshold)
+        .forEach(
+            e -> {
+              BlockGZIPFileWriter blockWriter = e.getValue().getWriter();
+              log.info(
+                  "{} partition: {}, totalCompressedSize: {}",
+                  name(),
+                  e.getValue(),
+                  blockWriter.getTotalCompressedSize());
+              result.put(e.getKey(), currentOffsets.get(e.getKey()));
+            });
+
+    if (!result.isEmpty()) {
+      log.info("{} result: {}", name(), result);
+      flush(result);
+    }
+
+    return result;
   }
 
   @Override
@@ -207,6 +247,10 @@ public class S3SinkTask extends SinkTask {
               firstOffset,
               GZIPChunkThreshold,
               format.init(tp.topic(), tp.partition(), firstOffset));
+    }
+
+    public BlockGZIPFileWriter getWriter() {
+      return writer;
     }
 
     private void writeAll(Collection<SinkRecord> records) {
