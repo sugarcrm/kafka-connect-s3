@@ -1,11 +1,10 @@
 package com.spredfast.kafka.connect.s3;
 
-import java.util.Map;
-import java.util.Objects;
-
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3Client;
 import com.amazonaws.services.s3.S3ClientOptions;
+import java.util.Map;
+import java.util.Objects;
 
 public class S3 {
 
@@ -18,9 +17,9 @@ public class S3 {
 		if (s3Endpoint != null && !Objects.equals(s3Endpoint, "")) {
 			s3Client.setEndpoint(s3Endpoint);
 		}
-		Boolean s3PathStyle = Boolean.parseBoolean(config.get("s3.path_style"));
+		boolean s3PathStyle = Boolean.parseBoolean(config.get("s3.path_style"));
 		if (s3PathStyle) {
-			s3Client.setS3ClientOptions(new S3ClientOptions().withPathStyleAccess(true));
+			s3Client.setS3ClientOptions(S3ClientOptions.builder().setPathStyleAccess(true).build());
 		}
 		return s3Client;
 	}

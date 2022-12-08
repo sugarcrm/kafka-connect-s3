@@ -1,5 +1,6 @@
 package com.spredfast.kafka.connect.s3.sink;
 
+import com.amazonaws.services.s3.transfer.TransferManagerBuilder;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileReader;
@@ -37,7 +38,7 @@ import com.spredfast.kafka.connect.s3.json.ChunksIndex;
  */
 public class S3Writer {
 	private static final TimeZone UTC = TimeZone.getTimeZone("UTC");
-	private final ObjectReader reader = new ObjectMapper().reader(ChunksIndex.class);
+	private final ObjectReader reader = new ObjectMapper().readerFor(ChunksIndex.class);
 	private String keyPrefix;
 	private String bucket;
 	private AmazonS3 s3Client;
@@ -48,7 +49,7 @@ public class S3Writer {
 	}
 
 	public S3Writer(String bucket, String keyPrefix, AmazonS3 s3Client) {
-		this(bucket, keyPrefix, s3Client, new TransferManager(s3Client));
+		this(bucket, keyPrefix, s3Client, TransferManagerBuilder.standard().withS3Client(s3Client).build());
 	}
 
 	public S3Writer(String bucket, String keyPrefix, AmazonS3 s3Client, TransferManager tm) {
