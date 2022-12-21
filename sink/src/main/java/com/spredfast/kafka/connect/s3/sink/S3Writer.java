@@ -62,12 +62,10 @@ public class S3Writer {
 		this.tm = tm;
 	}
 
-	public long putChunk(String localDataFile, String localIndexFile, TopicPartition tp) throws IOException {
+	public void putChunk(String localDataFile, String localIndexFile, TopicPartition tp) throws IOException {
 		// Put data file then index, then finally update/create the last_index_file marker
 		String dataFileKey = this.getChunkFileKey(localDataFile);
 		String idxFileKey = this.getChunkFileKey(localIndexFile);
-		// Read offset first since we'll delete the file after upload
-		long nextOffset = getNextOffsetFromIndexFileContents(new FileReader(localIndexFile));
 
 		try {
 			Upload upload = tm.upload(this.bucket, dataFileKey, new File(localDataFile));
@@ -79,9 +77,6 @@ public class S3Writer {
 		}
 
 		this.updateCursorFile(idxFileKey, tp);
-
-		// Sanity check - return what the new nextOffset will be based on the index we just uploaded
-		return nextOffset;
 	}
 
 	public long fetchOffset(TopicPartition tp) throws IOException {
