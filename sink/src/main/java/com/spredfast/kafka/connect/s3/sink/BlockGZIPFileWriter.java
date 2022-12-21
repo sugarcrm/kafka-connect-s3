@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.zip.GZIPOutputStream;
 
-import org.apache.kafka.connect.errors.RetriableException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spredfast.kafka.connect.s3.json.ChunkDescriptor;
 import com.spredfast.kafka.connect.s3.json.ChunksIndex;
@@ -36,8 +35,8 @@ import com.spredfast.kafka.connect.s3.json.ChunksIndex;
  */
 public class BlockGZIPFileWriter implements Closeable {
 
-	private String filenameBase;
-	private String path;
+	final private File dataFile;
+	final private File indexFile;
 	private GZIPOutputStream gzipStream;
 	private CountingOutputStream fileStream;
 	private final ObjectMapper objectMapper = new ObjectMapper();
@@ -90,7 +89,7 @@ public class BlockGZIPFileWriter implements Closeable {
 		}
 	}
 
-	private ArrayList<Chunk> chunks;
+	private ArrayList<Chunk> chunks = new ArrayList<>();
 
 	// Default each chunk is 64MB of uncompressed data
 	private long chunkThreshold;
@@ -100,41 +99,32 @@ public class BlockGZIPFileWriter implements Closeable {
 	// record offsets in the index to reflect the global offset rather than local
 	private long firstRecordOffset;
 
-	public BlockGZIPFileWriter(String filenameBase, String path) throws IOException {
-		this(filenameBase, path, 0, 67108864);
+	public BlockGZIPFileWriter(File directory) throws IOException {
+		this(directory, 0, 67108864);
 	}
 
-	public BlockGZIPFileWriter(String filenameBase, String path, long firstRecordOffset) throws IOException {
-		this(filenameBase, path, firstRecordOffset, 67108864);
+	public BlockGZIPFileWriter(File directory, long firstRecordOffset) throws IOException {
+		this(directory, firstRecordOffset, 67108864);
 	}
 
-	public BlockGZIPFileWriter(String filenameBase, String path, long firstRecordOffset, long chunkThreshold) throws IOException {
-		this(filenameBase, path, firstRecordOffset, chunkThreshold, new byte[0]);
+	public BlockGZIPFileWriter(File directory, long firstRecordOffset, long chunkThreshold) throws IOException {
+		this(directory, firstRecordOffset, chunkThreshold, new byte[0]);
 	}
 
-	public BlockGZIPFileWriter(String filenameBase, String path, long firstRecordOffset, long chunkThreshold, byte[] header)
+	public BlockGZIPFileWriter(File directory, long firstRecordOffset, long chunkThreshold, byte[] header)
 		throws IOException {
-		this.filenameBase = filenameBase;
-		this.path = path;
 		this.firstRecordOffset = firstRecordOffset;
 		this.chunkThreshold = chunkThreshold;
-
-		chunks = new ArrayList<>();
 
 		// Initialize first chunk
 		Chunk ch = new Chunk();
 		ch.firstOffset = firstRecordOffset;
 		chunks.add(ch);
 
-		// Explicitly truncate the file. On linux and OS X this appears to happen
-		// anyway when opening with FileOutputStream but that behavior is not actually documented
-		// or specified anywhere so let's be rigorous about it.
-		File file = new File(getDataFilePath());
-		if (!file.getParentFile().exists() && !file.getParentFile().mkdirs()) {
-			throw new RetriableException("could not create file " + file);
-		}
-		FileOutputStream fos = new FileOutputStream(file);
-		fos.getChannel().truncate(0);
+		dataFile = File.createTempFile("data", null, directory);
+		indexFile = File.createTempFile("index", null, directory);
+
+		FileOutputStream fos = new FileOutputStream(dataFile);
 
 		// Open file for writing and setup
 		this.fileStream = new CountingOutputStream(fos);
@@ -158,22 +148,17 @@ public class BlockGZIPFileWriter implements Closeable {
 		return chunks.get(chunks.size() - 1);
 	}
 
-	public String getDataFileName() {
-		return String.format("%s-%012d.gz", filenameBase, firstRecordOffset);
+	public File getDataFile() {
+		return dataFile;
 	}
 
-	public String getIndexFileName() {
-		return String.format("%s-%012d.index.json", filenameBase, firstRecordOffset);
+	public File getIndexFile() {
+		return indexFile;
 	}
 
-	public String getDataFilePath() {
-		return String.format("%s/%s", path, this.getDataFileName());
+	public long getFirstRecordOffset() {
+		return firstRecordOffset;
 	}
-
-	public String getIndexFilePath() {
-		return String.format("%s/%s", path, this.getIndexFileName());
-	}
-
 
 	/**
 	 *
@@ -208,15 +193,14 @@ public class BlockGZIPFileWriter implements Closeable {
 	}
 
 	public void delete() {
-		deleteIfExists(getDataFilePath());
-		deleteIfExists(getIndexFilePath());
+		deleteIfExists(getDataFile());
+		deleteIfExists(getIndexFile());
 	}
 
-	private void deleteIfExists(String path) {
-		File f = new File(path);
-		if (f.exists() && !f.isDirectory()) {
+	private void deleteIfExists(File file) {
+		if (file.exists() && !file.isDirectory()) {
 			//noinspection ResultOfMethodCallIgnored
-			f.delete();
+			file.delete();
 		}
 	}
 
@@ -240,7 +224,6 @@ public class BlockGZIPFileWriter implements Closeable {
 	}
 
 	private void writeIndex() throws IOException {
-		File indexFile = new File(getIndexFilePath());
 		if (!indexFile.getParentFile().exists() && !indexFile.getParentFile().mkdirs()) {
 			throw new IOException("Cannot create index " + indexFile);
 		}

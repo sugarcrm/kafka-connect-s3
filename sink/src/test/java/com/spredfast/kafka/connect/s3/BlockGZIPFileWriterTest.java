@@ -25,35 +25,21 @@ import com.spredfast.kafka.connect.s3.sink.BlockGZIPFileWriter;
 public class BlockGZIPFileWriterTest {
 
 	private String tmpDirPrefix = "BlockGZIPFileWriterTest";
-	private String tmpDir;
+	private File tmpDir;
 
 	public BlockGZIPFileWriterTest() {
 
 		String tempDir = System.getProperty("java.io.tmpdir");
-		this.tmpDir = new File(tempDir, tmpDirPrefix).toString();
+		this.tmpDir = new File(tempDir, tmpDirPrefix);
 
 		System.out.println("Temp dir for writer test is: " + tmpDir);
 	}
 
 	@Before
 	public void setUp() throws Exception {
-		File f = new File(tmpDir);
-
-		if (!f.exists()) {
-			f.mkdir();
+		if (!tmpDir.exists()) {
+			tmpDir.mkdir();
 		}
-	}
-
-	@Test
-	public void testPaths() throws Exception {
-		BlockGZIPFileWriter w = new BlockGZIPFileWriter("foo", tmpDir);
-		assertEquals(tmpDir + "/foo-000000000000.gz", w.getDataFilePath());
-		assertEquals(tmpDir + "/foo-000000000000.index.json", w.getIndexFilePath());
-
-
-		BlockGZIPFileWriter w2 = new BlockGZIPFileWriter("foo", tmpDir, 123456);
-		assertEquals(tmpDir + "/foo-000000123456.gz", w2.getDataFilePath());
-		assertEquals(tmpDir + "/foo-000000123456.index.json", w2.getIndexFilePath());
 	}
 
 	@Test
@@ -63,7 +49,7 @@ public class BlockGZIPFileWriterTest {
 			+ "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789";
 
 		// Make a writer with artificially small chunk threshold of 1kb
-		BlockGZIPFileWriter w = new BlockGZIPFileWriter("write-test", tmpDir, 987654321, 1000);
+		BlockGZIPFileWriter w = new BlockGZIPFileWriter(tmpDir, 987654321, 1000);
 
 		int totalUncompressedBytes = 0;
 		String[] expectedLines = new String[50];
@@ -83,7 +69,7 @@ public class BlockGZIPFileWriterTest {
 
 		w.close();
 
-		verifyOutputIsSaneGZIPFile(w.getDataFilePath(), expectedLines);
+		verifyOutputIsSaneGZIPFile(w.getDataFile(), expectedLines);
 		verifyIndexFile(w, 987654321, expectedLines);
 	}
 
@@ -91,8 +77,8 @@ public class BlockGZIPFileWriterTest {
 		return Arrays.asList((line + '\n').getBytes());
 	}
 
-	private void verifyOutputIsSaneGZIPFile(String filename, String[] expectedRecords) throws Exception {
-		GZIPInputStream zip = new GZIPInputStream(new FileInputStream(filename));
+	private void verifyOutputIsSaneGZIPFile(File file, String[] expectedRecords) throws Exception {
+		GZIPInputStream zip = new GZIPInputStream(new FileInputStream(file));
 		BufferedReader r = new BufferedReader(new InputStreamReader(zip, "UTF-8"));
 
 		String line;
@@ -108,11 +94,11 @@ public class BlockGZIPFileWriterTest {
 	}
 
 	private void verifyIndexFile(BlockGZIPFileWriter w, int startOffset, String[] expectedRecords) throws Exception {
-		ChunksIndex index = new ObjectMapper().readerFor(ChunksIndex.class).readValue(new FileReader(w.getIndexFilePath()));
+		ChunksIndex index = new ObjectMapper().readerFor(ChunksIndex.class).readValue(new FileReader(w.getIndexFile()));
 
 		assertEquals(w.getNumChunks(), index.chunks.size());
 
-		RandomAccessFile file = new RandomAccessFile(w.getDataFilePath(), "r");
+		RandomAccessFile file = new RandomAccessFile(w.getDataFile(), "r");
 
 		// Check we can read all the chunks as individual gzip segments
 		int expectedStartOffset = startOffset;
@@ -166,7 +152,7 @@ public class BlockGZIPFileWriterTest {
 	public void testShouldOverwrite() throws Exception {
 		// Make writer and write to it a bit.
 		{
-			BlockGZIPFileWriter w = new BlockGZIPFileWriter("overwrite-test", tmpDir);
+			BlockGZIPFileWriter w = new BlockGZIPFileWriter(tmpDir);
 
 			// Write at least a few 4k blocks to disk so we can be sure that we don't
 			// only overwrite the first block.
@@ -182,14 +168,14 @@ public class BlockGZIPFileWriterTest {
 			w.close();
 
 			// Just check it actually write to disk
-			verifyOutputIsSaneGZIPFile(w.getDataFilePath(), expectedLines);
+			verifyOutputIsSaneGZIPFile(w.getDataFile(), expectedLines);
 			verifyIndexFile(w, 0, expectedLines);
 
 		}
 
 		{
 			// Now make a whole new writer for same chunk
-			BlockGZIPFileWriter w = new BlockGZIPFileWriter("overwrite-test", tmpDir);
+			BlockGZIPFileWriter w = new BlockGZIPFileWriter(tmpDir);
 
 			// Only write a few lines
 			String[] expectedLines2 = new String[10];
@@ -204,7 +190,7 @@ public class BlockGZIPFileWriterTest {
 			w.close();
 
 			// No check output is only the 10 lines we just wrote
-			verifyOutputIsSaneGZIPFile(w.getDataFilePath(), expectedLines2);
+			verifyOutputIsSaneGZIPFile(w.getDataFile(), expectedLines2);
 			verifyIndexFile(w, 0, expectedLines2);
 		}
 	}
@@ -212,7 +198,7 @@ public class BlockGZIPFileWriterTest {
 	@Test
 	public void testDelete() throws Exception {
 		// Make writer and write to it a bit.
-		BlockGZIPFileWriter w = new BlockGZIPFileWriter("overwrite-test", tmpDir);
+		BlockGZIPFileWriter w = new BlockGZIPFileWriter(tmpDir);
 
 		String[] expectedLines = new String[5000];
 		for (int i = 0; i < 5000; i++) {
@@ -226,16 +212,13 @@ public class BlockGZIPFileWriterTest {
 		w.close();
 
 		// Just check it actually write to disk
-		verifyOutputIsSaneGZIPFile(w.getDataFilePath(), expectedLines);
+		verifyOutputIsSaneGZIPFile(w.getDataFile(), expectedLines);
 		verifyIndexFile(w, 0, expectedLines);
 
 		// Now remove it
 		w.delete();
 
-		File dataF = new File(w.getDataFilePath());
-		File idxF = new File(w.getIndexFilePath());
-
-		assertFalse("Data file should not exist after delete", dataF.exists());
-		assertFalse("Index file should not exist after delete", idxF.exists());
+		assertFalse("Data file should not exist after delete", w.getDataFile().exists());
+		assertFalse("Index file should not exist after delete", w.getIndexFile().exists());
 	}
 }
