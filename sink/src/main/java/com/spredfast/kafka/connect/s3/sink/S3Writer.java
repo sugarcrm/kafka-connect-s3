@@ -3,12 +3,9 @@ package com.spredfast.kafka.connect.s3.sink;
 import com.amazonaws.services.s3.transfer.TransferManagerBuilder;
 import java.io.ByteArrayInputStream;
 import java.io.File;
-import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.TimeZone;
@@ -62,21 +59,21 @@ public class S3Writer {
 		this.tm = tm;
 	}
 
-	public void putChunk(String localDataFile, String localIndexFile, TopicPartition tp) throws IOException {
+	public void putChunk(File dataFile, File indexFile, TopicPartition tp, long firstRecordOffset) throws IOException {
 		// Put data file then index, then finally update/create the last_index_file marker
-		String dataFileKey = this.getChunkFileKey(localDataFile);
-		String idxFileKey = this.getChunkFileKey(localIndexFile);
+		String dataObjectKey = this.getObjectKey(tp, firstRecordOffset, "gz");
+		String indexObjectKey = this.getObjectKey(tp, firstRecordOffset, "index.json");
 
 		try {
-			Upload upload = tm.upload(this.bucket, dataFileKey, new File(localDataFile));
+			Upload upload = tm.upload(this.bucket, dataObjectKey, dataFile);
 			upload.waitForCompletion();
-			upload = tm.upload(this.bucket, idxFileKey, new File(localIndexFile));
+			upload = tm.upload(this.bucket, indexObjectKey, indexFile);
 			upload.waitForCompletion();
 		} catch (Exception e) {
 			throw new IOException("Failed to upload to S3", e);
 		}
 
-		this.updateCursorFile(idxFileKey, tp);
+		this.updateCursorFile(indexObjectKey, tp);
 	}
 
 	public long fetchOffset(TopicPartition tp) throws IOException {
@@ -127,15 +124,16 @@ public class S3Writer {
 
 	// We store chunk files with a date prefix just to make finding them and navigating around the bucket a bit easier
 	// date is meaningless other than "when this was uploaded"
-	private String getChunkFileKey(String localFilePath) {
-		Path p = Paths.get(localFilePath);
-		SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
+	private String getObjectKey(TopicPartition tp, long firstRecordOffset, String extension) {
+		final SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
 		df.setTimeZone(UTC);
-		return String.format("%s%s/%s", keyPrefix, df.format(new Date()), p.getFileName().toString());
+		final String date = df.format(new Date());
+
+		return String.format("%s%s/%s-%05d-%012d.%s", keyPrefix, date, tp.topic(), tp.partition(), firstRecordOffset, extension);
 	}
 
 	private String getTopicPartitionLastIndexFileKey(TopicPartition tp) {
-		return String.format("%slast_chunk_index.%s-%05d.txt", this.keyPrefix, tp.topic(), tp.partition());
+		return String.format("%slast_chunk_index.%s-%05d.txt", keyPrefix, tp.topic(), tp.partition());
 	}
 
 	private void updateCursorFile(String lastIndexFileKey, TopicPartition tp) throws IOException {

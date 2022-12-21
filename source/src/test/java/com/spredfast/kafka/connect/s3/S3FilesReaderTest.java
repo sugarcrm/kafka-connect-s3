@@ -2,7 +2,6 @@ package com.spredfast.kafka.connect.s3;
 
 import static java.util.stream.Collectors.toList;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -343,8 +342,8 @@ public class S3FilesReaderTest {
 
 	private void givenASingleDayWithManyPartitions(Path dir, boolean includeKeys) throws IOException {
 		new File(dir.toFile(), "prefix/2016-01-01").mkdirs();
-		try (BlockGZIPFileWriter p0 = new BlockGZIPFileWriter("topic-00000", dir.toString() + "/prefix/2016-01-01", 0, 512);
-			 BlockGZIPFileWriter p1 = new BlockGZIPFileWriter("topic-00001", dir.toString() + "/prefix/2016-01-01", 0, 512);
+		try (BlockGZIPFileWriter p0 = new BlockGZIPFileWriter(dir.toString() + "/prefix/2016-01-01", 0, 512);
+             BlockGZIPFileWriter p1 = new BlockGZIPFileWriter(dir.toString() + "/prefix/2016-01-01", 0, 512);
 		) {
 			write(p0, "key0-0".getBytes(), "value0-0".getBytes(), includeKeys);
 			write(p1, "key1-0".getBytes(), "value1-0".getBytes(), includeKeys);
@@ -361,10 +360,10 @@ public class S3FilesReaderTest {
 		new File(dir.toFile(), "prefix/2015-12-31").mkdirs();
 		new File(dir.toFile(), "prefix/2016-01-01").mkdirs();
 		new File(dir.toFile(), "prefix/2016-01-02").mkdirs();
-		try (BlockGZIPFileWriter writer0 = new BlockGZIPFileWriter("topic-00003", dir.toString() + "/prefix/2015-12-31", 1, 512);
-			 BlockGZIPFileWriter writer1 = new BlockGZIPFileWriter("topic-00000", dir.toString() + "/prefix/2016-01-01", 0, 512);
-			 BlockGZIPFileWriter writer2 = new BlockGZIPFileWriter("topic-00001", dir.toString() + "/prefix/2016-01-02", 0, 512);
-			 BlockGZIPFileWriter preWriter1 = new BlockGZIPFileWriter("topic-00003", dir.toString() + "/prefix/2015-12-30", 0, 512);
+		try (BlockGZIPFileWriter writer0 = new BlockGZIPFileWriter(dir.toString() + "/prefix/2015-12-31", 1, 512);
+             BlockGZIPFileWriter writer1 = new BlockGZIPFileWriter(dir.toString() + "/prefix/2016-01-01", 0, 512);
+             BlockGZIPFileWriter writer2 = new BlockGZIPFileWriter(dir.toString() + "/prefix/2016-01-02", 0, 512);
+             BlockGZIPFileWriter preWriter1 = new BlockGZIPFileWriter(dir.toString() + "/prefix/2015-12-30", 0, 512);
 		) {
 			write(preWriter1, "willbe".getBytes(), "skipped0".getBytes(), includeKeys);
 

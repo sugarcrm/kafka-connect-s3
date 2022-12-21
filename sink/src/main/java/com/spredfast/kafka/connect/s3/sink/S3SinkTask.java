@@ -4,6 +4,7 @@ import static java.util.Optional.ofNullable;
 import static java.util.stream.Collectors.groupingBy;
 import static java.util.stream.Collectors.toList;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
@@ -97,7 +98,7 @@ public class S3SinkTask extends SinkTask {
 	public void stop() throws ConnectException {
 		// ensure we delete our temp files
 		for (PartitionWriter writer : partitions.values()) {
-			log.debug("{} Stopping - Deleting temp file {}", name(), writer.getDataFilePath());
+			log.debug("{} Stopping - Deleting temp file {}", name(), writer.getDataFile());
 			writer.delete();
 		}
 	}
@@ -172,17 +173,20 @@ public class S3SinkTask extends SinkTask {
 			this.tp = tp;
 			format = recordFormat.newWriter();
 
-			String name = String.format("%s-%05d", tp.topic(), tp.partition());
-			String path = configGet("local.buffer.dir")
-				.orElseThrow(() -> new ConnectException("No local buffer file path configured"));
-			log.debug("New temp file: {}/{} @ {}", path, name, firstOffset);
+			String localBufferDirectory = configGet("local.buffer.dir")
+				.orElseThrow(() -> new ConnectException("No local buffer directory configured"));
+
+			File directory = new File(localBufferDirectory);
+			if (!directory.exists() && !directory.mkdirs()) {
+				throw new ConnectException("Could not create directory " + localBufferDirectory);
+			}
 
 			Map<String, String> writerTags = new HashMap<>(S3SinkTask.this.tags);
 			writerTags.put("kafka_topic", tp.topic());
 			writerTags.put("kafka_partition", "" + tp.partition());
 			this.tags = writerTags;
 
-			writer = new BlockGZIPFileWriter(name, path, firstOffset, GZIPChunkThreshold, format.init(tp.topic(), tp.partition(), firstOffset));
+			writer = new BlockGZIPFileWriter(directory, firstOffset, GZIPChunkThreshold, format.init(tp.topic(), tp.partition(), firstOffset));
 		}
 
 		private void writeAll(Collection<SinkRecord> records) {
@@ -198,8 +202,8 @@ public class S3SinkTask extends SinkTask {
 			}
 		}
 
-		public String getDataFilePath() {
-			return writer.getDataFilePath();
+		public File getDataFile() {
+			return writer.getDataFile();
 		}
 
 		public void delete() {
@@ -218,7 +222,7 @@ public class S3SinkTask extends SinkTask {
 					writer.close();
 					closed = true;
 				}
-				s3.putChunk(writer.getDataFilePath(), writer.getIndexFilePath(), tp);
+				s3.putChunk(writer.getDataFile(), writer.getIndexFile(), tp, writer.getFirstRecordOffset());
 			} catch (IOException e) {
 				throw new RetriableException("Error flushing " + tp, e);
 			}
