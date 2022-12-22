@@ -62,6 +62,11 @@ public class S3FilesReaderTest {
 		testReadingBytesFromS3(new GroupedByDateLayout(DATE_SUPPLIER));
 	}
 
+	@Test
+	public void testReadingBytesFromS3GroupedByTopic() throws IOException, NoSuchFieldException {
+		testReadingBytesFromS3(new GroupedByTopicLayout(DATE_SUPPLIER));
+	}
+
 	private void testReadingBytesFromS3(Layout layout) throws IOException, NoSuchFieldException {
 		final Path dir = Files.createTempDirectory("s3FilesReaderTest");
 		givenSomeData(dir, layout.getBuilder());
@@ -76,6 +81,11 @@ public class S3FilesReaderTest {
 	@Test
 	public void testExcludingByMessageKeyGroupedByDate() throws IOException, NoSuchFieldException {
 		testExcludingByMessageKey(new GroupedByDateLayout(DATE_SUPPLIER));
+	}
+
+	@Test
+	public void testExcludingByMessageKeyGroupedByTopic() throws IOException, NoSuchFieldException {
+		testExcludingByMessageKey(new GroupedByTopicLayout(DATE_SUPPLIER));
 	}
 
 	private void testExcludingByMessageKey(Layout layout) throws IOException, NoSuchFieldException {
@@ -96,6 +106,11 @@ public class S3FilesReaderTest {
 		testReadingBytesFromS3MultiPartition(new GroupedByDateLayout(DATE_SUPPLIER));
 	}
 
+	@Test
+	public void testReadingBytesFromS3MultiPartitionGroupedByTopic() throws IOException, NoSuchFieldException {
+		testReadingBytesFromS3MultiPartition(new GroupedByTopicLayout(DATE_SUPPLIER));
+	}
+
 	private void testReadingBytesFromS3MultiPartition(Layout layout) throws IOException, NoSuchFieldException {
 		// scenario: multiple partition files at the end of a listing, page size >  # of files
 		// do we read all of them?
@@ -112,6 +127,11 @@ public class S3FilesReaderTest {
 	@Test
 	public void testReadingBytesFromS3WithOffsetsGroupedByDate() throws IOException, NoSuchFieldException {
 		testReadingBytesFromS3WithOffsets(new GroupedByDateLayout(DATE_SUPPLIER));
+	}
+
+	@Test
+	public void testReadingBytesFromS3WithOffsetsGroupedByTopic() throws IOException, NoSuchFieldException {
+		testReadingBytesFromS3WithOffsets(new GroupedByTopicLayout(DATE_SUPPLIER));
 	}
 
 	private void testReadingBytesFromS3WithOffsets(Layout layout) throws IOException, NoSuchFieldException {
@@ -135,6 +155,11 @@ public class S3FilesReaderTest {
 	@Test
 	public void testReadingBytesFromS3WithOffsetsAtEndOfFileGroupedByDate() throws IOException, NoSuchFieldException {
 		testReadingBytesFromS3WithOffsetsAtEndOfFile(new GroupedByDateLayout(DATE_SUPPLIER));
+	}
+
+	@Test
+	public void testReadingBytesFromS3WithOffsetsAtEndOfFileGroupedByTopic() throws IOException, NoSuchFieldException {
+		testReadingBytesFromS3WithOffsetsAtEndOfFile(new GroupedByTopicLayout(DATE_SUPPLIER));
 	}
 
 	private void testReadingBytesFromS3WithOffsetsAtEndOfFile(Layout layout) throws IOException, NoSuchFieldException {
@@ -173,6 +198,11 @@ public class S3FilesReaderTest {
 	@Test
 	public void testReadingBytesFromS3WithoutKeysGroupedByDate() throws IOException, NoSuchFieldException {
 		testReadingBytesFromS3WithoutKeys(new GroupedByDateLayout(DATE_SUPPLIER));
+	}
+
+	@Test
+	public void testReadingBytesFromS3WithoutKeysGroupedByTopic() throws IOException, NoSuchFieldException {
+		testReadingBytesFromS3WithoutKeys(new GroupedByTopicLayout(DATE_SUPPLIER));
 	}
 
 	private void testReadingBytesFromS3WithoutKeys(Layout layout) throws IOException, NoSuchFieldException {

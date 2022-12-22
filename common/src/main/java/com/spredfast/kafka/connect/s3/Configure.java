@@ -137,11 +137,14 @@ public abstract class Configure {
 
 		String type = props.getOrDefault("layout", "grouped_by_date");
 
-		if (type.equals("grouped_by_date")) {
-			return new GroupedByDateLayout(dateSupplier);
+		switch (type) {
+			case "grouped_by_date":
+				return new GroupedByDateLayout(dateSupplier);
+			case "grouped_by_topic":
+				return new GroupedByTopicLayout(dateSupplier);
+			default:
+				throw new IllegalArgumentException("Unknown layout type: " + type);
 		}
-
-		throw new IllegalArgumentException("Unknown layout type: " + type);
 	}
 
 	public static Map<String, String> parseTags(String tagString) {

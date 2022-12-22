@@ -132,6 +132,11 @@ public class S3WriterTest {
 		testUpload(new GroupedByDateLayout(DATE_SUPPLIER));
 	}
 
+	@Test
+	public void testUploadGroupedByTopic() throws Exception {
+		testUpload(new GroupedByTopicLayout(DATE_SUPPLIER));
+	}
+
 	private void testUpload(Layout layout) throws Exception {
 		AmazonS3 s3Mock = mock(AmazonS3.class);
 		Layout.Builder layoutBuilder = layout.getBuilder();
@@ -177,6 +182,11 @@ public class S3WriterTest {
 		testFetchOffsetNewTopic(new GroupedByDateLayout(DATE_SUPPLIER));
 	}
 
+	@Test
+	public void testFetchOffsetNewTopicGroupedByTopic() throws Exception {
+		testFetchOffsetNewTopic(new GroupedByTopicLayout(DATE_SUPPLIER));
+	}
+
 	private void testFetchOffsetNewTopic(Layout layout) throws Exception {
 		AmazonS3 s3Mock = mock(AmazonS3.class);
 		Layout.Builder layoutBuilder = layout.getBuilder();
@@ -199,6 +209,11 @@ public class S3WriterTest {
 	@Test
 	public void testFetchOffsetExistingTopicGroupedByDate() throws Exception {
 		testFetchOffsetExistingTopic(new GroupedByDateLayout(DATE_SUPPLIER));
+	}
+
+	@Test
+	public void testFetchOffsetExistingTopicGroupedByTopic() throws Exception {
+		testFetchOffsetExistingTopic(new GroupedByTopicLayout(DATE_SUPPLIER));
 	}
 
 	private void testFetchOffsetExistingTopic(Layout layout) throws Exception {
