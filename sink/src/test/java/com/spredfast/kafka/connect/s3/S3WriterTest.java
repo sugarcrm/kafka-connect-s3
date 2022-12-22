@@ -18,6 +18,7 @@ import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.TimeZone;
 
 import org.apache.kafka.common.TopicPartition;
 import org.junit.Before;
@@ -38,6 +39,7 @@ import com.spredfast.kafka.connect.s3.sink.S3Writer;
  * how well I can mock S3 API beyond a certain point.
  */
 public class S3WriterTest {
+	private static final TimeZone UTC = TimeZone.getTimeZone("UTC");
 
 	private String testBucket = "kafka-connect-s3-unit-test";
 	private String tmpDirPrefix = "S3WriterTest";
@@ -121,6 +123,7 @@ public class S3WriterTest {
 
 	private String getKeyForFilename(String prefix, String name) {
 		SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
+		df.setTimeZone(UTC);
 		return String.format("%s/%s/%s", prefix, df.format(new Date()), name);
 	}
 
