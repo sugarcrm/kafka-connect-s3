@@ -119,10 +119,10 @@ public class S3WriterTest {
 		assertEquals(content, sb.toString());
 	}
 
-	private String getKeyForFilename(String prefix, String name) {
+	private String getKeyForFilename(String prefix, String topic, String name) {
 		SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
 		df.setTimeZone(UTC);
-		return String.format("%s/%s/%s", prefix, df.format(new Date()), name);
+		return String.format("%s/%s/%s/%s", prefix, topic, df.format(new Date()), name);
 	}
 
 	@Test
@@ -135,21 +135,21 @@ public class S3WriterTest {
 
 		Upload mockUpload = mock(Upload.class);
 
-		when(tmMock.upload(eq(testBucket), eq(getKeyForFilename("pfx", "bar-00000-000000000000.gz")), isA(File.class)))
+		when(tmMock.upload(eq(testBucket), isA(String.class), isA(File.class)))
 			.thenReturn(mockUpload);
-		when(tmMock.upload(eq(testBucket), eq(getKeyForFilename("pfx", "bar-00000-000000000000.index.json")), isA(File.class)))
+		when(tmMock.upload(eq(testBucket), isA(String.class), isA(File.class)))
 			.thenReturn(mockUpload);
 
 		s3Writer.putChunk(fileWriter.getDataFile(), fileWriter.getIndexFile(), tp, fileWriter.getFirstRecordOffset());
 
 		verifyTMUpload(tmMock, new ExpectedRequestParams[]{
-			new ExpectedRequestParams(getKeyForFilename("pfx", "bar-00000-000000000000.gz"), testBucket),
-			new ExpectedRequestParams(getKeyForFilename("pfx", "bar-00000-000000000000.index.json"), testBucket)
+			new ExpectedRequestParams(getKeyForFilename("pfx", "bar", "00000-000000000000.gz"), testBucket),
+			new ExpectedRequestParams(getKeyForFilename("pfx", "bar", "00000-000000000000.index.json"), testBucket)
 		});
 
 		// Verify it also wrote the index file key
-		verifyStringPut(s3Mock, "pfx/last_chunk_index.bar-00000.txt",
-			getKeyForFilename("pfx", "bar-00000-000000000000.index.json"));
+		verifyStringPut(s3Mock, "pfx/bar/last_chunk_index.00000.txt",
+			getKeyForFilename("pfx", "bar", "00000-000000000000.index.json"));
 	}
 
 	private S3Object makeMockS3Object(String key, String contents) throws Exception {
@@ -171,14 +171,14 @@ public class S3WriterTest {
 		// Since the file won't exist. code will expect the initial fetch to 404
 		AmazonS3Exception ase = new AmazonS3Exception("The specified key does not exist.");
 		ase.setStatusCode(404);
-		when(s3Mock.getObject(eq(testBucket), eq("pfx/last_chunk_index.new_topic-00000.txt")))
+		when(s3Mock.getObject(eq(testBucket), eq("pfx/new_topic/last_chunk_index.00000.txt")))
 			.thenThrow(ase)
 			.thenReturn(null);
 
 		TopicPartition tp = new TopicPartition("new_topic", 0);
 		long offset = s3Writer.fetchOffset(tp);
 		assertEquals(0, offset);
-		verify(s3Mock).getObject(eq(testBucket), eq("pfx/last_chunk_index.new_topic-00000.txt"));
+		verify(s3Mock).getObject(eq(testBucket), eq("pfx/new_topic/last_chunk_index.00000.txt"));
 	}
 
 	@Test
@@ -188,11 +188,11 @@ public class S3WriterTest {
 		// Existing topic should return correct offset
 		// We expect 2 fetches, one for the cursor file
 		// and second for the index file itself
-		String indexKey = getKeyForFilename("pfx", "bar-00000-000000010042.index.json");
+		String indexKey = getKeyForFilename("pfx", "bar", "00000-000000010042.index.json");
 
-		when(s3Mock.getObject(eq(testBucket), eq("pfx/last_chunk_index.bar-00000.txt")))
+		when(s3Mock.getObject(eq(testBucket), eq("pfx/bar/last_chunk_index.00000.txt")))
 			.thenReturn(
-				makeMockS3Object("pfx/last_chunk_index.bar-00000.txt", indexKey)
+				makeMockS3Object("pfx/bar/last_chunk_index.00000.txt", indexKey)
 			);
 
 		when(s3Mock.getObject(eq(testBucket), eq(indexKey)))
@@ -211,7 +211,7 @@ public class S3WriterTest {
 		TopicPartition tp = new TopicPartition("bar", 0);
 		long offset = s3Writer.fetchOffset(tp);
 		assertEquals(12031 + 34, offset);
-		verify(s3Mock).getObject(eq(testBucket), eq("pfx/last_chunk_index.bar-00000.txt"));
+		verify(s3Mock).getObject(eq(testBucket), eq("pfx/bar/last_chunk_index.00000.txt"));
 		verify(s3Mock).getObject(eq(testBucket), eq(indexKey));
 
 	}

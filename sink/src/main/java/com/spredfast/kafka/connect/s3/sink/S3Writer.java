@@ -129,11 +129,11 @@ public class S3Writer {
 		df.setTimeZone(UTC);
 		final String date = df.format(new Date());
 
-		return String.format("%s%s/%s-%05d-%012d.%s", keyPrefix, date, tp.topic(), tp.partition(), firstRecordOffset, extension);
+		return String.format("%s%s/%s/%05d-%012d.%s", keyPrefix, tp.topic(), date, tp.partition(), firstRecordOffset, extension);
 	}
 
 	private String getTopicPartitionLastIndexFileKey(TopicPartition tp) {
-		return String.format("%slast_chunk_index.%s-%05d.txt", keyPrefix, tp.topic(), tp.partition());
+		return String.format("%s%s/last_chunk_index.%05d.txt", keyPrefix, tp.topic(), tp.partition());
 	}
 
 	private void updateCursorFile(String lastIndexFileKey, TopicPartition tp) throws IOException {
