@@ -14,11 +14,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiPredicate;
 import java.util.function.Supplier;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.amazonaws.AmazonClientException;
@@ -30,6 +30,8 @@ import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
+import com.spredfast.kafka.connect.s3.BlockMetadata;
+import com.spredfast.kafka.connect.s3.Layout;
 import com.spredfast.kafka.connect.s3.LazyString;
 import com.spredfast.kafka.connect.s3.S3RecordsReader;
 import com.spredfast.kafka.connect.s3.json.ChunkDescriptor;
@@ -51,27 +53,24 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 
 	private static final Logger log = LoggerFactory.getLogger(S3FilesReader.class);
 
-	public static final Pattern DEFAULT_PATTERN = Pattern.compile(
-		"(\\/|^)"                        // match the / or the start of the key so we shouldn't have to worry about prefix
-			+ "(?<topic>[^/]+?)-"            // assuming no / in topic names
-			+ "(?<partition>\\d{5})-"
-			+ "(?<offset>\\d{12})\\.gz$"
-	);
-
 	private final AmazonS3 s3Client;
 
 	private final Supplier<S3RecordsReader> makeReader;
 
 	private final Map<S3Partition, S3Offset> offsets;
 
+	private final Layout.Parser layoutParser;
+
 	private final ObjectReader indexParser = new ObjectMapper().readerFor(ChunksIndex.class);
 
 	private final S3SourceConfig config;
 
-	public S3FilesReader(S3SourceConfig config, AmazonS3 s3Client, Map<S3Partition, S3Offset> offsets, Supplier<S3RecordsReader> recordReader) {
+	public S3FilesReader(S3SourceConfig config, AmazonS3 s3Client, Map<S3Partition, S3Offset> offsets,
+						 Layout.Parser layoutParser, Supplier<S3RecordsReader> recordReader) {
 		this.config = config;
 		this.offsets = Optional.ofNullable(offsets).orElseGet(HashMap::new);
 		this.s3Client = s3Client;
+		this.layoutParser = layoutParser;
 		this.makeReader = recordReader;
 	}
 
@@ -105,22 +104,6 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 	}
 
 	private static final Pattern DATA_SUFFIX = Pattern.compile("\\.gz$");
-
-	private int partition(String key) {
-		final Matcher matcher = S3FilesReader.DEFAULT_PATTERN.matcher(key);
-		if (!matcher.find()) {
-			throw new IllegalArgumentException("Not a valid chunk filename! " + key);
-		}
-		return Integer.parseInt(matcher.group("partition"));
-	}
-
-	private String topic(String key) {
-		final Matcher matcher = S3FilesReader.DEFAULT_PATTERN.matcher(key);
-		if (!matcher.find()) {
-			throw new IllegalArgumentException("Not a valid chunk filename! " + key);
-		}
-		return matcher.group("topic");
-	}
 
 	public Iterator<S3SourceRecord> readAll() {
 		Iterator<S3SourceRecord> iterator = new Iterator<S3SourceRecord>() {
@@ -205,7 +188,11 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 			}
 
 			private S3Offset offset(S3ObjectSummary chunk) {
-				return offsets.get(S3Partition.from(config.bucket, config.keyPrefix, topic(chunk.getKey()), partition(chunk.getKey())));
+				final TopicPartition topicPartition = layoutParser.parseBlockPath(chunk.getKey()).getTopicPartition();
+				final S3Partition s3Partition = S3Partition.from(config.bucket, config.keyPrefix,
+						topicPartition.topic(), topicPartition.partition());
+
+				return offsets.get(s3Partition);
 			}
 
 			/**
@@ -344,15 +331,10 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 	}
 
 	private <T> T parseKey(String key, KeyConsumer<T> consumer) throws IOException {
-		final Matcher matcher = S3FilesReader.DEFAULT_PATTERN.matcher(key);
-		if (!matcher.find()) {
-			throw new IllegalArgumentException("Not a valid chunk filename! " + key);
-		}
-		final String topic = matcher.group("topic");
-		final int partition = Integer.parseInt(matcher.group("partition"));
-		final long startOffset = Long.parseLong(matcher.group("offset"));
+        final BlockMetadata metadata = layoutParser.parseBlockPath(key);
+        final TopicPartition topicPartition = metadata.getTopicPartition();
 
-		return consumer.consume(topic, partition, startOffset);
+        return consumer.consume(topicPartition.topic(), topicPartition.partition(), metadata.getStartOffset());
 	}
 
 

@@ -26,9 +26,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.amazonaws.services.s3.AmazonS3;
 import com.spredfast.kafka.connect.s3.AlreadyBytesConverter;
+import com.spredfast.kafka.connect.s3.BlockMetadata;
 import com.spredfast.kafka.connect.s3.Configure;
 import com.spredfast.kafka.connect.s3.Constants;
 import com.spredfast.kafka.connect.s3.Metrics;
+import com.spredfast.kafka.connect.s3.Layout;
 import com.spredfast.kafka.connect.s3.S3;
 import com.spredfast.kafka.connect.s3.S3RecordFormat;
 import com.spredfast.kafka.connect.s3.S3RecordsWriter;
@@ -80,7 +82,9 @@ public class S3SinkTask extends SinkTask {
 			.orElse("");
 		AmazonS3 s3Client = S3.s3client(config);
 
-		s3 = new S3Writer(bucket, prefix, s3Client);
+		Layout layout = Configure.createLayout(props);
+
+		s3 = new S3Writer(bucket, prefix, layout.getBuilder(), s3Client);
 
 		metrics = Configure.metrics(props);
 		tags = Configure.parseTags(props.get("metrics.tags"));
@@ -222,7 +226,8 @@ public class S3SinkTask extends SinkTask {
 					writer.close();
 					closed = true;
 				}
-				s3.putChunk(writer.getDataFile(), writer.getIndexFile(), tp, writer.getStartOffset());
+				final BlockMetadata blockMetadata = new BlockMetadata(tp, writer.getStartOffset());
+				s3.putChunk(writer.getDataFile(), writer.getIndexFile(), blockMetadata);
 			} catch (IOException e) {
 				throw new RetriableException("Error flushing " + tp, e);
 			}
