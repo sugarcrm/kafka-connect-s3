@@ -8,7 +8,6 @@ public class S3SourceConfig {
 	public String keyPrefix = "";
 	public int pageSize = 500;
 	public String startMarker = null; // for partial replay
-	public Pattern keyPattern = S3FilesReader.DEFAULT_PATTERN;
 	public S3FilesReader.InputFilter inputFilter = S3FilesReader.InputFilter.GUNZIP;
 	public S3FilesReader.PartitionFilter partitionFilter = S3FilesReader.PartitionFilter.MATCH_ALL;
 	public List<String> messageKeyExcludeList;
@@ -17,12 +16,11 @@ public class S3SourceConfig {
 		this.bucket = bucket;
 	}
 
-	public S3SourceConfig(String bucket, String keyPrefix, int pageSize, String startMarker, Pattern keyPattern, S3FilesReader.InputFilter inputFilter, S3FilesReader.PartitionFilter partitionFilter, List<String> messageKeyExcludeList) {
+	public S3SourceConfig(String bucket, String keyPrefix, int pageSize, String startMarker, S3FilesReader.InputFilter inputFilter, S3FilesReader.PartitionFilter partitionFilter, List<String> messageKeyExcludeList) {
 		this.bucket = bucket;
 		this.keyPrefix = keyPrefix;
 		this.pageSize = pageSize;
 		this.startMarker = startMarker;
-		this.keyPattern = keyPattern;
 		if (inputFilter != null) {
 			this.inputFilter = inputFilter;
 		}

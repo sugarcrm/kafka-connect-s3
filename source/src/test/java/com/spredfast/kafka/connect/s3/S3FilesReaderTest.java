@@ -147,7 +147,7 @@ public class S3FilesReaderTest {
 		int partInt = Integer.valueOf(partition, 10);
 		offsets.put(S3Partition.from("bucket", "prefix", "topic", partInt),
 			S3Offset.from(marker, nextOffset - 1 /* an S3 offset is the last record processed, so go back 1 to consume next */));
-		return new S3FilesReader(new S3SourceConfig("bucket", "prefix", 1, null, S3FilesReader.DEFAULT_PATTERN, S3FilesReader.InputFilter.GUNZIP,
+		return new S3FilesReader(new S3SourceConfig("bucket", "prefix", 1, null, S3FilesReader.InputFilter.GUNZIP,
 			p -> partInt == p, null), client, offsets, () -> new BytesRecordReader(true));
 	}
 
@@ -217,13 +217,13 @@ public class S3FilesReaderTest {
 	}
 
 	private List<String> whenTheRecordsAreRead(AmazonS3 client, List<String> messageKeyExcludeList) {
-		S3SourceConfig config = new S3SourceConfig("bucket", "prefix", 3, "prefix/2016-01-01", S3FilesReader.DEFAULT_PATTERN, S3FilesReader.InputFilter.GUNZIP, null, messageKeyExcludeList);
+		S3SourceConfig config = new S3SourceConfig("bucket", "prefix", 3, "prefix/2016-01-01", S3FilesReader.InputFilter.GUNZIP, null, messageKeyExcludeList);
 		S3FilesReader reader = new S3FilesReader(config, client, null,() -> new BytesRecordReader(true));
 		return whenTheRecordsAreRead(reader);
 	}
 
 	private List<String> whenTheRecordsAreRead(AmazonS3 client, boolean fileIncludesKeys, int pageSize) {
-		S3FilesReader reader = new S3FilesReader(new S3SourceConfig("bucket", "prefix", pageSize, "prefix/2016-01-01", S3FilesReader.DEFAULT_PATTERN, S3FilesReader.InputFilter.GUNZIP, null, null), client, null,() -> new BytesRecordReader(fileIncludesKeys));
+		S3FilesReader reader = new S3FilesReader(new S3SourceConfig("bucket", "prefix", pageSize, "prefix/2016-01-01", S3FilesReader.InputFilter.GUNZIP, null, null), client, null,() -> new BytesRecordReader(fileIncludesKeys));
 		return whenTheRecordsAreRead(reader);
 	}
 

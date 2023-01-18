@@ -107,7 +107,7 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 	private static final Pattern DATA_SUFFIX = Pattern.compile("\\.gz$");
 
 	private int partition(String key) {
-		final Matcher matcher = config.keyPattern.matcher(key);
+		final Matcher matcher = S3FilesReader.DEFAULT_PATTERN.matcher(key);
 		if (!matcher.find()) {
 			throw new IllegalArgumentException("Not a valid chunk filename! " + key);
 		}
@@ -115,7 +115,7 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 	}
 
 	private String topic(String key) {
-		final Matcher matcher = config.keyPattern.matcher(key);
+		final Matcher matcher = S3FilesReader.DEFAULT_PATTERN.matcher(key);
 		if (!matcher.find()) {
 			throw new IllegalArgumentException("Not a valid chunk filename! " + key);
 		}
@@ -344,7 +344,7 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 	}
 
 	private <T> T parseKey(String key, KeyConsumer<T> consumer) throws IOException {
-		final Matcher matcher = config.keyPattern.matcher(key);
+		final Matcher matcher = S3FilesReader.DEFAULT_PATTERN.matcher(key);
 		if (!matcher.find()) {
 			throw new IllegalArgumentException("Not a valid chunk filename! " + key);
 		}
