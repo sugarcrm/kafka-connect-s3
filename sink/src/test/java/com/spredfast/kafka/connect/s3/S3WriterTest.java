@@ -18,6 +18,7 @@ import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.TimeZone;
 
 import org.apache.kafka.common.TopicPartition;
 import org.junit.Before;
@@ -38,30 +39,29 @@ import com.spredfast.kafka.connect.s3.sink.S3Writer;
  * how well I can mock S3 API beyond a certain point.
  */
 public class S3WriterTest {
+	private static final TimeZone UTC = TimeZone.getTimeZone("UTC");
 
 	private String testBucket = "kafka-connect-s3-unit-test";
 	private String tmpDirPrefix = "S3WriterTest";
-	private String tmpDir;
+	private File tmpDir;
 
 	public S3WriterTest() {
 
 		String tempDir = System.getProperty("java.io.tmpdir");
-		this.tmpDir = new File(tempDir, tmpDirPrefix).toString();
+		this.tmpDir = new File(tempDir, tmpDirPrefix);
 
 		System.out.println("Temp dir for writer test is: " + tmpDir);
 	}
 
 	@Before
 	public void setUp() throws Exception {
-		File f = new File(tmpDir);
-
-		if (!f.exists()) {
-			f.mkdir();
+		if (!tmpDir.exists()) {
+			tmpDir.mkdir();
 		}
 	}
 
 	private BlockGZIPFileWriter createDummmyFiles(long offset, int numRecords) throws Exception {
-		BlockGZIPFileWriter writer = new BlockGZIPFileWriter("bar-00000", tmpDir, offset);
+		BlockGZIPFileWriter writer = new BlockGZIPFileWriter(tmpDir, offset);
 		for (int i = 0; i < numRecords; i++) {
 			writer.write(Arrays.asList(String.format("Record %d", i).getBytes()), 1);
 		}
@@ -121,6 +121,7 @@ public class S3WriterTest {
 
 	private String getKeyForFilename(String prefix, String name) {
 		SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
+		df.setTimeZone(UTC);
 		return String.format("%s/%s/%s", prefix, df.format(new Date()), name);
 	}
 
@@ -139,7 +140,7 @@ public class S3WriterTest {
 		when(tmMock.upload(eq(testBucket), eq(getKeyForFilename("pfx", "bar-00000-000000000000.index.json")), isA(File.class)))
 			.thenReturn(mockUpload);
 
-		s3Writer.putChunk(fileWriter.getDataFilePath(), fileWriter.getIndexFilePath(), tp);
+		s3Writer.putChunk(fileWriter.getDataFile(), fileWriter.getIndexFile(), tp, fileWriter.getFirstRecordOffset());
 
 		verifyTMUpload(tmMock, new ExpectedRequestParams[]{
 			new ExpectedRequestParams(getKeyForFilename("pfx", "bar-00000-000000000000.gz"), testBucket),

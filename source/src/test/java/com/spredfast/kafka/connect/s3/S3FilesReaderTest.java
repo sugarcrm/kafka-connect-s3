@@ -29,6 +29,7 @@ import java.util.TreeSet;
 import java.util.stream.Stream;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaAndValue;
 import org.apache.kafka.connect.storage.Converter;
@@ -147,7 +148,7 @@ public class S3FilesReaderTest {
 		int partInt = Integer.valueOf(partition, 10);
 		offsets.put(S3Partition.from("bucket", "prefix", "topic", partInt),
 			S3Offset.from(marker, nextOffset - 1 /* an S3 offset is the last record processed, so go back 1 to consume next */));
-		return new S3FilesReader(new S3SourceConfig("bucket", "prefix", 1, null, S3FilesReader.DEFAULT_PATTERN, S3FilesReader.InputFilter.GUNZIP,
+		return new S3FilesReader(new S3SourceConfig("bucket", "prefix", 1, null, S3FilesReader.InputFilter.GUNZIP,
 			p -> partInt == p, null), client, offsets, () -> new BytesRecordReader(true));
 	}
 
@@ -217,13 +218,13 @@ public class S3FilesReaderTest {
 	}
 
 	private List<String> whenTheRecordsAreRead(AmazonS3 client, List<String> messageKeyExcludeList) {
-		S3SourceConfig config = new S3SourceConfig("bucket", "prefix", 3, "prefix/2016-01-01", S3FilesReader.DEFAULT_PATTERN, S3FilesReader.InputFilter.GUNZIP, null, messageKeyExcludeList);
+		S3SourceConfig config = new S3SourceConfig("bucket", "prefix", 3, "prefix/2016-01-01", S3FilesReader.InputFilter.GUNZIP, null, messageKeyExcludeList);
 		S3FilesReader reader = new S3FilesReader(config, client, null,() -> new BytesRecordReader(true));
 		return whenTheRecordsAreRead(reader);
 	}
 
 	private List<String> whenTheRecordsAreRead(AmazonS3 client, boolean fileIncludesKeys, int pageSize) {
-		S3FilesReader reader = new S3FilesReader(new S3SourceConfig("bucket", "prefix", pageSize, "prefix/2016-01-01", S3FilesReader.DEFAULT_PATTERN, S3FilesReader.InputFilter.GUNZIP, null, null), client, null,() -> new BytesRecordReader(fileIncludesKeys));
+		S3FilesReader reader = new S3FilesReader(new S3SourceConfig("bucket", "prefix", pageSize, "prefix/2016-01-01", S3FilesReader.InputFilter.GUNZIP, null, null), client, null,() -> new BytesRecordReader(fileIncludesKeys));
 		return whenTheRecordsAreRead(reader);
 	}
 
@@ -342,13 +343,15 @@ public class S3FilesReaderTest {
 	}
 
 	private void givenASingleDayWithManyPartitions(Path dir, boolean includeKeys) throws IOException {
-		new File(dir.toFile(), "prefix/2016-01-01").mkdirs();
-		try (BlockGZIPFileWriter p0 = new BlockGZIPFileWriter("topic-00000", dir.toString() + "/prefix/2016-01-01", 0, 512);
-			 BlockGZIPFileWriter p1 = new BlockGZIPFileWriter("topic-00001", dir.toString() + "/prefix/2016-01-01", 0, 512);
+		try (BlockGZIPFileWriter p0 = new BlockGZIPFileWriter(dir.toFile(), 0, 512);
+			 BlockGZIPFileWriter p1 = new BlockGZIPFileWriter(dir.toFile(), 0, 512);
 		) {
 			write(p0, "key0-0".getBytes(), "value0-0".getBytes(), includeKeys);
+			upload(p0, dir, "2016-01-01", 0);
+
 			write(p1, "key1-0".getBytes(), "value1-0".getBytes(), includeKeys);
 			write(p1, "key1-1".getBytes(), "value1-1".getBytes(), includeKeys);
+			upload(p1, dir, "2016-01-01", 1);
 		}
 	}
 
@@ -357,25 +360,25 @@ public class S3FilesReaderTest {
 	}
 
 	private void givenSomeData(Path dir, boolean includeKeys) throws IOException {
-		new File(dir.toFile(), "prefix/2015-12-30").mkdirs();
-		new File(dir.toFile(), "prefix/2015-12-31").mkdirs();
-		new File(dir.toFile(), "prefix/2016-01-01").mkdirs();
-		new File(dir.toFile(), "prefix/2016-01-02").mkdirs();
-		try (BlockGZIPFileWriter writer0 = new BlockGZIPFileWriter("topic-00003", dir.toString() + "/prefix/2015-12-31", 1, 512);
-			 BlockGZIPFileWriter writer1 = new BlockGZIPFileWriter("topic-00000", dir.toString() + "/prefix/2016-01-01", 0, 512);
-			 BlockGZIPFileWriter writer2 = new BlockGZIPFileWriter("topic-00001", dir.toString() + "/prefix/2016-01-02", 0, 512);
-			 BlockGZIPFileWriter preWriter1 = new BlockGZIPFileWriter("topic-00003", dir.toString() + "/prefix/2015-12-30", 0, 512);
+		try (BlockGZIPFileWriter writer1 = new BlockGZIPFileWriter(dir.toFile(), 0, 512);
+			 BlockGZIPFileWriter writer2 = new BlockGZIPFileWriter(dir.toFile(), 1, 512);
+			 BlockGZIPFileWriter writer3 = new BlockGZIPFileWriter(dir.toFile(), 0, 512);
+			 BlockGZIPFileWriter writer4 = new BlockGZIPFileWriter(dir.toFile(), 0, 512);
 		) {
-			write(preWriter1, "willbe".getBytes(), "skipped0".getBytes(), includeKeys);
+			write(writer1, "willbe".getBytes(), "skipped0".getBytes(), includeKeys);
+			upload(writer1, dir, "2015-12-30", 3);
 
 			for (int i = 1; i < 10; i++) {
-				write(writer0, "willbe".getBytes(), ("skipped" + i).getBytes(), includeKeys);
+				write(writer2, "willbe".getBytes(), ("skipped" + i).getBytes(), includeKeys);
 			}
+			upload(writer2, dir, "2015-12-31", 3);
 
-			write(writer1, "key0-0".getBytes(), "value0-0".getBytes(), includeKeys);
+			write(writer3, "key0-0".getBytes(), "value0-0".getBytes(), includeKeys);
+			upload(writer3, dir, "2016-01-01", 0);
 
-			write(writer2, "key1-0".getBytes(), "value1-0".getBytes(), includeKeys);
-			write(writer2, "key1-1".getBytes(), "value1-1".getBytes(), includeKeys);
+			write(writer4, "key1-0".getBytes(), "value1-0".getBytes(), includeKeys);
+			write(writer4, "key1-1".getBytes(), "value1-1".getBytes(), includeKeys);
+			upload(writer4, dir, "2016-01-02", 1);
 		}
 	}
 
@@ -383,5 +386,16 @@ public class S3FilesReaderTest {
 		writer.write(new ByteLengthFormat(includeKeys).newWriter().writeBatch(Stream.of(new ProducerRecord<>("", key, value))).collect(toList()), 1);
 	}
 
+	private void upload(BlockGZIPFileWriter writer, Path dir, String date, int partition) throws IOException {
+		writer.close();
+		rename(writer.getDataFile(), dir, date, partition, writer.getFirstRecordOffset(), ".gz");
+		rename(writer.getIndexFile(), dir, date, partition, writer.getFirstRecordOffset(), ".index.json");
+	}
+
+	private void rename(File file, Path dir, String date, int partition, long startOffset, String extension) {
+		final File dest = new File(dir.toFile(), String.format("prefix/%s/topic-%05d-%012d%s", date, partition, startOffset, extension));
+		dest.getParentFile().mkdirs();
+		assertTrue(file.renameTo(dest));
+	}
 
 }

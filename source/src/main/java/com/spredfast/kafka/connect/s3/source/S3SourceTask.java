@@ -122,7 +122,6 @@ public class S3SourceTask extends SourceTask {
 			bucket, prefix,
 			configGet("s3.page.size").map(Integer::parseInt).orElse(100),
 			configGet("s3.start.marker").orElse(null),
-			S3FilesReader.DEFAULT_PATTERN,
 			S3FilesReader.InputFilter.GUNZIP,
 			S3FilesReader.PartitionFilter.from((topic, partition) ->
 				(topics.isEmpty() || topics.contains(topic))
