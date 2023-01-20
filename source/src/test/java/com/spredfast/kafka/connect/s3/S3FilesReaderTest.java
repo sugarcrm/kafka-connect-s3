@@ -298,7 +298,7 @@ public class S3FilesReaderTest {
 	S3Object getFile(String key, Path dir) throws FileNotFoundException {
 		S3Object obj = mock(S3Object.class);
 		File file = new File(dir.toString(), key);
-		when(obj.getKey()).thenReturn(file.getName());
+		when(obj.getKey()).thenReturn(key);
 		S3ObjectInputStream stream = new S3ObjectInputStream(new FileInputStream(file), null);
 		when(obj.getObjectContent()).thenReturn(stream);
 		return obj;
