@@ -222,7 +222,7 @@ public class S3SinkTask extends SinkTask {
 					writer.close();
 					closed = true;
 				}
-				s3.putChunk(writer.getDataFile(), writer.getIndexFile(), tp, writer.getFirstRecordOffset());
+				s3.putChunk(writer.getDataFile(), writer.getIndexFile(), tp, writer.getStartOffset());
 			} catch (IOException e) {
 				throw new RetriableException("Error flushing " + tp, e);
 			}

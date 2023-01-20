@@ -94,31 +94,31 @@ public class BlockGZIPFileWriter implements Closeable {
 	// Default each chunk is 64MB of uncompressed data
 	private long chunkThreshold;
 
-	// Offset to the first record.
+	// Start offset of the block.
 	// Set to non-zero if this file is part of a larger stream and you want
 	// record offsets in the index to reflect the global offset rather than local
-	private long firstRecordOffset;
+	private long startOffset;
 
 	public BlockGZIPFileWriter(File directory) throws IOException {
 		this(directory, 0, 67108864);
 	}
 
-	public BlockGZIPFileWriter(File directory, long firstRecordOffset) throws IOException {
-		this(directory, firstRecordOffset, 67108864);
+	public BlockGZIPFileWriter(File directory, long startOffset) throws IOException {
+		this(directory, startOffset, 67108864);
 	}
 
-	public BlockGZIPFileWriter(File directory, long firstRecordOffset, long chunkThreshold) throws IOException {
-		this(directory, firstRecordOffset, chunkThreshold, new byte[0]);
+	public BlockGZIPFileWriter(File directory, long startOffset, long chunkThreshold) throws IOException {
+		this(directory, startOffset, chunkThreshold, new byte[0]);
 	}
 
-	public BlockGZIPFileWriter(File directory, long firstRecordOffset, long chunkThreshold, byte[] header)
+	public BlockGZIPFileWriter(File directory, long startOffset, long chunkThreshold, byte[] header)
 		throws IOException {
-		this.firstRecordOffset = firstRecordOffset;
+		this.startOffset = startOffset;
 		this.chunkThreshold = chunkThreshold;
 
 		// Initialize first chunk
 		Chunk ch = new Chunk();
-		ch.firstOffset = firstRecordOffset;
+		ch.firstOffset = startOffset;
 		chunks.add(ch);
 
 		dataFile = File.createTempFile("data", null, directory);
@@ -156,8 +156,8 @@ public class BlockGZIPFileWriter implements Closeable {
 		return indexFile;
 	}
 
-	public long getFirstRecordOffset() {
-		return firstRecordOffset;
+	public long getStartOffset() {
+		return startOffset;
 	}
 
 	/**

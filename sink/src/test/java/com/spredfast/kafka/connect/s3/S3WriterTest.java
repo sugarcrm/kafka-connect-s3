@@ -140,7 +140,7 @@ public class S3WriterTest {
 		when(tmMock.upload(eq(testBucket), eq(getKeyForFilename("pfx", "bar-00000-000000000000.index.json")), isA(File.class)))
 			.thenReturn(mockUpload);
 
-		s3Writer.putChunk(fileWriter.getDataFile(), fileWriter.getIndexFile(), tp, fileWriter.getFirstRecordOffset());
+		s3Writer.putChunk(fileWriter.getDataFile(), fileWriter.getIndexFile(), tp, fileWriter.getStartOffset());
 
 		verifyTMUpload(tmMock, new ExpectedRequestParams[]{
 			new ExpectedRequestParams(getKeyForFilename("pfx", "bar-00000-000000000000.gz"), testBucket),

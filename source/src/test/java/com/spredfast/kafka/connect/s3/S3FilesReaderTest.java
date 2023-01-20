@@ -388,8 +388,8 @@ public class S3FilesReaderTest {
 
 	private void upload(BlockGZIPFileWriter writer, Path dir, String date, int partition) throws IOException {
 		writer.close();
-		rename(writer.getDataFile(), dir, date, partition, writer.getFirstRecordOffset(), ".gz");
-		rename(writer.getIndexFile(), dir, date, partition, writer.getFirstRecordOffset(), ".index.json");
+		rename(writer.getDataFile(), dir, date, partition, writer.getStartOffset(), ".gz");
+		rename(writer.getIndexFile(), dir, date, partition, writer.getStartOffset(), ".index.json");
 	}
 
 	private void rename(File file, Path dir, String date, int partition, long startOffset, String extension) {
