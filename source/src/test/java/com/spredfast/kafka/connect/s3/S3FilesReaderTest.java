@@ -12,7 +12,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.nio.charset.Charset;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,9 +29,6 @@ import java.util.stream.Stream;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.connect.data.Schema;
-import org.apache.kafka.connect.data.SchemaAndValue;
-import org.apache.kafka.connect.storage.Converter;
 import org.junit.Test;
 import org.mockito.internal.util.reflection.FieldSetter;
 import org.mockito.invocation.InvocationOnMock;
@@ -153,29 +149,6 @@ public class S3FilesReaderTest {
 			p -> partInt == p, null), client, offsets, LAYOUT_PARSER, () -> new BytesRecordReader(true));
 	}
 
-	public static class ReversedStringBytesConverter implements Converter {
-		@Override
-		public void configure(Map<String, ?> configs, boolean isKey) {
-			// while we're here, verify that we get our subconfig
-			assertEquals(configs.get("requiredProp"), "isPresent");
-		}
-
-		@Override
-		public byte[] fromConnectData(String topic, Schema schema, Object value) {
-			byte[] bytes = value.toString().getBytes(Charset.forName("UTF-8"));
-			byte[] result = new byte[bytes.length];
-			for (int i = 0; i < bytes.length; i++) {
-				result[bytes.length - i - 1] = bytes[i];
-			}
-			return result;
-		}
-
-		@Override
-		public SchemaAndValue toConnectData(String topic, byte[] value) {
-			throw new UnsupportedOperationException();
-		}
-	}
-
 	@Test
 	public void testReadingBytesFromS3_withoutKeys() throws IOException, NoSuchFieldException {
 		final Path dir = Files.createTempDirectory("s3FilesReaderTest");
@@ -186,14 +159,6 @@ public class S3FilesReaderTest {
 		List<String> results = whenTheRecordsAreRead(client, false);
 
 		theTheyAreInOrder(results);
-	}
-
-	Converter givenACustomConverter() {
-		Map<String, Object> config = new HashMap<>();
-		config.put("converter", AlreadyBytesConverter.class.getName());
-		config.put("converter.converter", ReversedStringBytesConverter.class.getName());
-		config.put("converter.converter.requiredProp", "isPresent");
-		return Configure.buildConverter(config, "converter", false, null);
 	}
 
 	void theTheyAreInOrder(List<String> results) {

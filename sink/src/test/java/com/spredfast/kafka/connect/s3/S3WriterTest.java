@@ -1,6 +1,7 @@
 package com.spredfast.kafka.connect.s3;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.isA;
@@ -14,7 +15,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.util.Arrays;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import org.apache.kafka.common.TopicPartition;
@@ -39,35 +40,33 @@ public class S3WriterTest {
 	private static final Layout.Builder LAYOUT_BUILDER = new GroupedByDateLayout(new CurrentUtcDateSupplier())
 			.getBuilder();
 
-	private String testBucket = "kafka-connect-s3-unit-test";
-	private String tmpDirPrefix = "S3WriterTest";
-	private File tmpDir;
+	final private String testBucket = "kafka-connect-s3-unit-test";
+	final private File tmpDir;
 
 	public S3WriterTest() {
 
 		String tempDir = System.getProperty("java.io.tmpdir");
+		String tmpDirPrefix = "S3WriterTest";
 		this.tmpDir = new File(tempDir, tmpDirPrefix);
 
 		System.out.println("Temp dir for writer test is: " + tmpDir);
 	}
 
 	@Before
-	public void setUp() throws Exception {
-		if (!tmpDir.exists()) {
-			tmpDir.mkdir();
-		}
+	public void setUp() {
+		assertTrue(tmpDir.exists() || tmpDir.mkdir());
 	}
 
-	private BlockGZIPFileWriter createDummmyFiles(long offset, int numRecords) throws Exception {
+	private BlockGZIPFileWriter createDummyFiles(long offset, int numRecords) throws Exception {
 		BlockGZIPFileWriter writer = new BlockGZIPFileWriter(tmpDir, offset);
 		for (int i = 0; i < numRecords; i++) {
-			writer.write(Arrays.asList(String.format("Record %d", i).getBytes()), 1);
+			writer.write(List.of(String.format("Record %d", i).getBytes()), 1);
 		}
 		writer.close();
 		return writer;
 	}
 
-	class ExpectedRequestParams {
+	static class ExpectedRequestParams {
 		public String key;
 		public String bucket;
 
@@ -86,9 +85,9 @@ public class S3WriterTest {
 		List<String> bucketArgs = bucketCaptor.getAllValues();
 		List<String> keyArgs = keyCaptor.getAllValues();
 
-		for (int i = 0; i < expect.length; i++) {
-			assertEquals(expect[i].bucket, bucketArgs.remove(0));
-			assertEquals(expect[i].key, keyArgs.remove(0));
+		for (ExpectedRequestParams expectedRequestParams : expect) {
+			assertEquals(expectedRequestParams.bucket, bucketArgs.remove(0));
+			assertEquals(expectedRequestParams.key, keyArgs.remove(0));
 		}
 	}
 
@@ -102,7 +101,7 @@ public class S3WriterTest {
 		assertEquals(key, req.getKey());
 		assertEquals(this.testBucket, req.getBucketName());
 
-		InputStreamReader input = new InputStreamReader(req.getInputStream(), "UTF-8");
+		InputStreamReader input = new InputStreamReader(req.getInputStream(), StandardCharsets.UTF_8);
 		StringBuilder sb = new StringBuilder(1024);
 		final char[] buffer = new char[1024];
 		try {
@@ -127,36 +126,37 @@ public class S3WriterTest {
 	public void testUpload() throws Exception {
 		AmazonS3 s3Mock = mock(AmazonS3.class);
 		TransferManager tmMock = mock(TransferManager.class);
-		BlockGZIPFileWriter fileWriter = createDummmyFiles(0, 1000);
-		S3Writer s3Writer = new S3Writer(testBucket, "pfx", LAYOUT_BUILDER, s3Mock, tmMock);
-		TopicPartition tp = new TopicPartition("bar", 0);
+		try (BlockGZIPFileWriter fileWriter = createDummyFiles(0, 1000)) {
+			S3Writer s3Writer = new S3Writer(testBucket, "pfx", LAYOUT_BUILDER, s3Mock, tmMock);
+			TopicPartition tp = new TopicPartition("bar", 0);
 
-		Upload mockUpload = mock(Upload.class);
+			Upload mockUpload = mock(Upload.class);
 
-		String dataKey = getKeyForFilename("pfx", "bar", 0, 0, ".gz");
-		String indexKey = getKeyForFilename("pfx", "bar", 0, 0, ".index.json");
+			String dataKey = getKeyForFilename("pfx", "bar", 0, 0, ".gz");
+			String indexKey = getKeyForFilename("pfx", "bar", 0, 0, ".index.json");
 
-		when(tmMock.upload(eq(testBucket), eq(dataKey), isA(File.class)))
-			.thenReturn(mockUpload);
-		when(tmMock.upload(eq(testBucket), eq(indexKey), isA(File.class)))
-			.thenReturn(mockUpload);
+			when(tmMock.upload(eq(testBucket), eq(dataKey), isA(File.class)))
+					.thenReturn(mockUpload);
+			when(tmMock.upload(eq(testBucket), eq(indexKey), isA(File.class)))
+					.thenReturn(mockUpload);
 
-		s3Writer.putChunk(fileWriter.getDataFile(), fileWriter.getIndexFile(), new BlockMetadata(tp, fileWriter.getStartOffset()));
+			s3Writer.putChunk(fileWriter.getDataFile(), fileWriter.getIndexFile(), new BlockMetadata(tp, fileWriter.getStartOffset()));
 
-		verifyTMUpload(tmMock, new ExpectedRequestParams[]{
-			new ExpectedRequestParams(dataKey, testBucket),
-			new ExpectedRequestParams(indexKey, testBucket)
-		});
+			verifyTMUpload(tmMock, new ExpectedRequestParams[]{
+					new ExpectedRequestParams(dataKey, testBucket),
+					new ExpectedRequestParams(indexKey, testBucket)
+			});
 
-		// Verify it also wrote the index file key
-		verifyStringPut(s3Mock, "pfx/last_chunk_index.bar-00000.txt", indexKey);
+			// Verify it also wrote the index file key
+			verifyStringPut(s3Mock, "pfx/last_chunk_index.bar-00000.txt", indexKey);
+		}
 	}
 
 	private S3Object makeMockS3Object(String key, String contents) throws Exception {
 		S3Object mock = new S3Object();
 		mock.setBucketName(this.testBucket);
 		mock.setKey(key);
-		InputStream stream = new ByteArrayInputStream(contents.getBytes("UTF-8"));
+		InputStream stream = new ByteArrayInputStream(contents.getBytes(StandardCharsets.UTF_8));
 		mock.setObjectContent(stream);
 		System.out.println("MADE MOCK FOR " + key + " WITH BODY: " + contents);
 		return mock;
