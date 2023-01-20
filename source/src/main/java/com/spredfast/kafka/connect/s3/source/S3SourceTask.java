@@ -29,6 +29,7 @@ import com.amazonaws.services.s3.model.AmazonS3Exception;
 import com.spredfast.kafka.connect.s3.AlreadyBytesConverter;
 import com.spredfast.kafka.connect.s3.Constants;
 import com.spredfast.kafka.connect.s3.Configure;
+import com.spredfast.kafka.connect.s3.Layout;
 import com.spredfast.kafka.connect.s3.S3;
 import com.spredfast.kafka.connect.s3.S3RecordFormat;
 
@@ -117,6 +118,7 @@ public class S3SourceTask extends SourceTask {
 
 		AmazonS3 client = S3.s3client(taskConfig);
 
+		Layout layout = Configure.createLayout(taskConfig);
 
 		S3SourceConfig config = new S3SourceConfig(
 			bucket, prefix,
@@ -133,7 +135,7 @@ public class S3SourceTask extends SourceTask {
 
 		log.debug("Reading from S3 with offsets {}", offsets);
 
-		reader = new S3FilesReader(config, client, offsets, format::newReader).readAll();
+		reader = new S3FilesReader(config, client, offsets, layout.getParser(), format::newReader).readAll();
 	}
 
 	private Optional<String> configGet(String key) {

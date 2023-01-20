@@ -6,14 +6,10 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.TimeZone;
 
 import org.apache.kafka.common.TopicPartition;
-import com.amazonaws.auth.profile.ProfileCredentialsProvider;
 import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3Client;
 import com.amazonaws.services.s3.model.AmazonS3Exception;
 import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.amazonaws.services.s3.model.PutObjectRequest;
@@ -22,6 +18,8 @@ import com.amazonaws.services.s3.transfer.TransferManager;
 import com.amazonaws.services.s3.transfer.Upload;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
+import com.spredfast.kafka.connect.s3.BlockMetadata;
+import com.spredfast.kafka.connect.s3.Layout;
 import com.spredfast.kafka.connect.s3.json.ChunkDescriptor;
 import com.spredfast.kafka.connect.s3.json.ChunksIndex;
 
@@ -38,31 +36,33 @@ public class S3Writer {
 	private final ObjectReader reader = new ObjectMapper().readerFor(ChunksIndex.class);
 	private String keyPrefix;
 	private String bucket;
+	private final Layout.Builder layoutBuilder;
 	private AmazonS3 s3Client;
 	private TransferManager tm;
 
-	public S3Writer(String bucket, String keyPrefix) {
-		this(bucket, keyPrefix, new AmazonS3Client(new ProfileCredentialsProvider()));
+	public S3Writer(String bucket, String keyPrefix, Layout.Builder layoutBuilder, AmazonS3 s3Client) {
+		this(bucket, keyPrefix, layoutBuilder, s3Client, TransferManagerBuilder.standard().withS3Client(s3Client).build());
 	}
 
-	public S3Writer(String bucket, String keyPrefix, AmazonS3 s3Client) {
-		this(bucket, keyPrefix, s3Client, TransferManagerBuilder.standard().withS3Client(s3Client).build());
-	}
-
-	public S3Writer(String bucket, String keyPrefix, AmazonS3 s3Client, TransferManager tm) {
+	public S3Writer(String bucket, String keyPrefix, Layout.Builder layoutBuilder, AmazonS3 s3Client, TransferManager tm) {
 		if (keyPrefix.length() > 0 && !keyPrefix.endsWith("/")) {
 			keyPrefix += "/";
 		}
 		this.keyPrefix = keyPrefix;
 		this.bucket = bucket;
+		this.layoutBuilder = layoutBuilder;
 		this.s3Client = s3Client;
 		this.tm = tm;
 	}
 
-	public void putChunk(File dataFile, File indexFile, TopicPartition tp, long firstRecordOffset) throws IOException {
+	public void putChunk(File dataFile, File indexFile, BlockMetadata metadata) throws IOException {
+
+		// Build the base key once to make sure that both the data and the index keys always fall under the same date.
+		final String baseKey = keyPrefix + layoutBuilder.buildBlockPath(metadata);
+
 		// Put data file then index, then finally update/create the last_index_file marker
-		String dataObjectKey = this.getObjectKey(tp, firstRecordOffset, "gz");
-		String indexObjectKey = this.getObjectKey(tp, firstRecordOffset, "index.json");
+		final String dataObjectKey = baseKey + ".gz";
+		final String indexObjectKey = baseKey + ".index.json";
 
 		try {
 			Upload upload = tm.upload(this.bucket, dataObjectKey, dataFile);
@@ -73,7 +73,7 @@ public class S3Writer {
 			throw new IOException("Failed to upload to S3", e);
 		}
 
-		this.updateCursorFile(indexObjectKey, tp);
+		this.updateCursorFile(indexObjectKey, metadata.getTopicPartition());
 	}
 
 	public long fetchOffset(TopicPartition tp) throws IOException {
@@ -122,18 +122,8 @@ public class S3Writer {
 		return lastChunk.first_record_offset + lastChunk.num_records;
 	}
 
-	// We store chunk files with a date prefix just to make finding them and navigating around the bucket a bit easier
-	// date is meaningless other than "when this was uploaded"
-	private String getObjectKey(TopicPartition tp, long firstRecordOffset, String extension) {
-		final SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
-		df.setTimeZone(UTC);
-		final String date = df.format(new Date());
-
-		return String.format("%s%s/%s-%05d-%012d.%s", keyPrefix, date, tp.topic(), tp.partition(), firstRecordOffset, extension);
-	}
-
 	private String getTopicPartitionLastIndexFileKey(TopicPartition tp) {
-		return String.format("%slast_chunk_index.%s-%05d.txt", keyPrefix, tp.topic(), tp.partition());
+		return keyPrefix + layoutBuilder.buildIndexPath(tp);
 	}
 
 	private void updateCursorFile(String lastIndexFileKey, TopicPartition tp) throws IOException {

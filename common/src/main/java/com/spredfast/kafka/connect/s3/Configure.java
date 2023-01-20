@@ -8,6 +8,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Supplier;
 
 import org.apache.kafka.common.Configurable;
 import org.apache.kafka.connect.errors.ConnectException;
@@ -129,6 +130,18 @@ public abstract class Configure {
 		} catch (Exception e) {
 			throw new ConnectException("Failed to create format: " + props.get("format"), e);
 		}
+	}
+
+	public static Layout createLayout(Map<String, String> props) {
+		final Supplier<String> dateSupplier = new CurrentUtcDateSupplier();
+
+		String type = props.getOrDefault("layout", "grouped_by_date");
+
+		if (type.equals("grouped_by_date")) {
+			return new GroupedByDateLayout(dateSupplier);
+		}
+
+		throw new IllegalArgumentException("Unknown layout type: " + type);
 	}
 
 	public static Map<String, String> parseTags(String tagString) {

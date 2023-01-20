@@ -58,6 +58,7 @@ import com.spredfast.kafka.connect.s3.source.S3SourceRecord;
  * Covers S3 and reading raw byte records. Closer to an integration test.
  */
 public class S3FilesReaderTest {
+	private static final Layout.Parser LAYOUT_PARSER = new GroupedByDateLayout.Parser();
 
 	@Test
 	public void testReadingBytesFromS3() throws IOException, NoSuchFieldException {
@@ -149,7 +150,7 @@ public class S3FilesReaderTest {
 		offsets.put(S3Partition.from("bucket", "prefix", "topic", partInt),
 			S3Offset.from(marker, nextOffset - 1 /* an S3 offset is the last record processed, so go back 1 to consume next */));
 		return new S3FilesReader(new S3SourceConfig("bucket", "prefix", 1, null, S3FilesReader.InputFilter.GUNZIP,
-			p -> partInt == p, null), client, offsets, () -> new BytesRecordReader(true));
+			p -> partInt == p, null), client, offsets, LAYOUT_PARSER, () -> new BytesRecordReader(true));
 	}
 
 	public static class ReversedStringBytesConverter implements Converter {
@@ -219,12 +220,12 @@ public class S3FilesReaderTest {
 
 	private List<String> whenTheRecordsAreRead(AmazonS3 client, List<String> messageKeyExcludeList) {
 		S3SourceConfig config = new S3SourceConfig("bucket", "prefix", 3, "prefix/2016-01-01", S3FilesReader.InputFilter.GUNZIP, null, messageKeyExcludeList);
-		S3FilesReader reader = new S3FilesReader(config, client, null,() -> new BytesRecordReader(true));
+		S3FilesReader reader = new S3FilesReader(config, client, null, LAYOUT_PARSER, () -> new BytesRecordReader(true));
 		return whenTheRecordsAreRead(reader);
 	}
 
 	private List<String> whenTheRecordsAreRead(AmazonS3 client, boolean fileIncludesKeys, int pageSize) {
-		S3FilesReader reader = new S3FilesReader(new S3SourceConfig("bucket", "prefix", pageSize, "prefix/2016-01-01", S3FilesReader.InputFilter.GUNZIP, null, null), client, null,() -> new BytesRecordReader(fileIncludesKeys));
+		S3FilesReader reader = new S3FilesReader(new S3SourceConfig("bucket", "prefix", pageSize, "prefix/2016-01-01", S3FilesReader.InputFilter.GUNZIP, null, null), client, null, LAYOUT_PARSER, () -> new BytesRecordReader(fileIncludesKeys));
 		return whenTheRecordsAreRead(reader);
 	}
 
@@ -388,12 +389,14 @@ public class S3FilesReaderTest {
 
 	private void upload(BlockGZIPFileWriter writer, Path dir, String date, int partition) throws IOException {
 		writer.close();
-		rename(writer.getDataFile(), dir, date, partition, writer.getFirstRecordOffset(), ".gz");
-		rename(writer.getIndexFile(), dir, date, partition, writer.getFirstRecordOffset(), ".index.json");
+		rename(writer.getDataFile(), dir, date, partition, writer.getStartOffset(), ".gz");
+		rename(writer.getIndexFile(), dir, date, partition, writer.getStartOffset(), ".index.json");
 	}
 
 	private void rename(File file, Path dir, String date, int partition, long startOffset, String extension) {
-		final File dest = new File(dir.toFile(), String.format("prefix/%s/topic-%05d-%012d%s", date, partition, startOffset, extension));
+		Layout.Builder layoutBuilder = new GroupedByDateLayout.Builder(() -> date);
+		final BlockMetadata metadata = new BlockMetadata(new TopicPartition("topic", partition), startOffset);
+		final File dest = new File(dir.toFile(), "prefix/" + layoutBuilder.buildBlockPath(metadata) + extension);
 		dest.getParentFile().mkdirs();
 		assertTrue(file.renameTo(dest));
 	}
