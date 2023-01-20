@@ -17,6 +17,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.function.Supplier;
 
 import org.apache.kafka.common.TopicPartition;
 import org.junit.Before;
@@ -37,8 +38,7 @@ import com.spredfast.kafka.connect.s3.sink.S3Writer;
  * how well I can mock S3 API beyond a certain point.
  */
 public class S3WriterTest {
-	private static final Layout.Builder LAYOUT_BUILDER = new GroupedByDateLayout(new CurrentUtcDateSupplier())
-			.getBuilder();
+	private static final Supplier<String> DATE_SUPPLIER = new CurrentUtcDateSupplier();
 
 	final private String testBucket = "kafka-connect-s3-unit-test";
 	final private File tmpDir;
@@ -116,24 +116,34 @@ public class S3WriterTest {
 		assertEquals(content, sb.toString());
 	}
 
-	private String getKeyForFilename(String prefix, String topic, int partition, long startOffset, String extension) {
+	private String getKeyForFilename(Layout.Builder layoutBuilder, String prefix, String topic, int partition, long startOffset, String extension) {
 		final TopicPartition topicPartition = new TopicPartition(topic, partition);
 		final BlockMetadata blockMetadata = new BlockMetadata(topicPartition, startOffset);
-		return String.format("%s/%s%s", prefix, LAYOUT_BUILDER.buildBlockPath(blockMetadata), extension);
+		return String.format("%s/%s%s", prefix, layoutBuilder.buildBlockPath(blockMetadata), extension);
+	}
+
+	private String getKeyForIndex(Layout.Builder layoutBuilder, String topic) {
+		final TopicPartition topicPartition = new TopicPartition(topic, 0);
+		return String.format("%s/%s", "pfx", layoutBuilder.buildIndexPath(topicPartition));
 	}
 
 	@Test
-	public void testUpload() throws Exception {
+	public void testUploadGroupedByDate() throws Exception {
+		testUpload(new GroupedByDateLayout(DATE_SUPPLIER));
+	}
+
+	private void testUpload(Layout layout) throws Exception {
 		AmazonS3 s3Mock = mock(AmazonS3.class);
+		Layout.Builder layoutBuilder = layout.getBuilder();
 		TransferManager tmMock = mock(TransferManager.class);
 		try (BlockGZIPFileWriter fileWriter = createDummyFiles(0, 1000)) {
-			S3Writer s3Writer = new S3Writer(testBucket, "pfx", LAYOUT_BUILDER, s3Mock, tmMock);
+			S3Writer s3Writer = new S3Writer(testBucket, "pfx", layoutBuilder, s3Mock, tmMock);
 			TopicPartition tp = new TopicPartition("bar", 0);
 
 			Upload mockUpload = mock(Upload.class);
 
-			String dataKey = getKeyForFilename("pfx", "bar", 0, 0, ".gz");
-			String indexKey = getKeyForFilename("pfx", "bar", 0, 0, ".index.json");
+			String dataKey = getKeyForFilename(layoutBuilder, "pfx", "bar", 0, 0, ".gz");
+			String indexKey = getKeyForFilename(layoutBuilder, "pfx", "bar", 0, 0, ".index.json");
 
 			when(tmMock.upload(eq(testBucket), eq(dataKey), isA(File.class)))
 					.thenReturn(mockUpload);
@@ -148,7 +158,7 @@ public class S3WriterTest {
 			});
 
 			// Verify it also wrote the index file key
-			verifyStringPut(s3Mock, "pfx/last_chunk_index.bar-00000.txt", indexKey);
+			verifyStringPut(s3Mock, getKeyForIndex(layoutBuilder, "bar"), indexKey);
 		}
 	}
 
@@ -163,36 +173,46 @@ public class S3WriterTest {
 	}
 
 	@Test
-	public void testFetchOffsetNewTopic() throws Exception {
+	public void testFetchOffsetNewTopicGroupedByDate() throws Exception {
+		testFetchOffsetNewTopic(new GroupedByDateLayout(DATE_SUPPLIER));
+	}
+
+	private void testFetchOffsetNewTopic(Layout layout) throws Exception {
 		AmazonS3 s3Mock = mock(AmazonS3.class);
-		S3Writer s3Writer = new S3Writer(testBucket, "pfx", LAYOUT_BUILDER, s3Mock);
+		Layout.Builder layoutBuilder = layout.getBuilder();
+		S3Writer s3Writer = new S3Writer(testBucket, "pfx", layoutBuilder, s3Mock);
 
 		// Non existing topic should return 0 offset
 		// Since the file won't exist. code will expect the initial fetch to 404
 		AmazonS3Exception ase = new AmazonS3Exception("The specified key does not exist.");
 		ase.setStatusCode(404);
-		when(s3Mock.getObject(eq(testBucket), eq("pfx/last_chunk_index.new_topic-00000.txt")))
+		when(s3Mock.getObject(eq(testBucket), eq(getKeyForIndex(layoutBuilder, "new_topic"))))
 			.thenThrow(ase)
 			.thenReturn(null);
 
 		TopicPartition tp = new TopicPartition("new_topic", 0);
 		long offset = s3Writer.fetchOffset(tp);
 		assertEquals(0, offset);
-		verify(s3Mock).getObject(eq(testBucket), eq("pfx/last_chunk_index.new_topic-00000.txt"));
+		verify(s3Mock).getObject(eq(testBucket), eq(getKeyForIndex(layoutBuilder, "new_topic")));
 	}
 
 	@Test
-	public void testFetchOffsetExistingTopic() throws Exception {
+	public void testFetchOffsetExistingTopicGroupedByDate() throws Exception {
+		testFetchOffsetExistingTopic(new GroupedByDateLayout(DATE_SUPPLIER));
+	}
+
+	private void testFetchOffsetExistingTopic(Layout layout) throws Exception {
 		AmazonS3 s3Mock = mock(AmazonS3.class);
-		S3Writer s3Writer = new S3Writer(testBucket, "pfx", LAYOUT_BUILDER, s3Mock);
+		Layout.Builder layoutBuilder = layout.getBuilder();
+		S3Writer s3Writer = new S3Writer(testBucket, "pfx", layoutBuilder, s3Mock);
 		// Existing topic should return correct offset
 		// We expect 2 fetches, one for the cursor file
 		// and second for the index file itself
-		String indexKey = getKeyForFilename("pfx", "bar", 0, 10042, ".index.json");
+		String indexKey = getKeyForFilename(layoutBuilder, "pfx", "bar", 0, 10042, ".index.json");
 
-		when(s3Mock.getObject(eq(testBucket), eq("pfx/last_chunk_index.bar-00000.txt")))
+		when(s3Mock.getObject(eq(testBucket), eq(getKeyForIndex(layoutBuilder, "bar"))))
 			.thenReturn(
-				makeMockS3Object("pfx/last_chunk_index.bar-00000.txt", indexKey)
+				makeMockS3Object(getKeyForIndex(layoutBuilder, "bar"), indexKey)
 			);
 
 		when(s3Mock.getObject(eq(testBucket), eq(indexKey)))
@@ -211,7 +231,7 @@ public class S3WriterTest {
 		TopicPartition tp = new TopicPartition("bar", 0);
 		long offset = s3Writer.fetchOffset(tp);
 		assertEquals(12031 + 34, offset);
-		verify(s3Mock).getObject(eq(testBucket), eq("pfx/last_chunk_index.bar-00000.txt"));
+		verify(s3Mock).getObject(eq(testBucket), eq(getKeyForIndex(layoutBuilder, "bar")));
 		verify(s3Mock).getObject(eq(testBucket), eq(indexKey));
 
 	}
