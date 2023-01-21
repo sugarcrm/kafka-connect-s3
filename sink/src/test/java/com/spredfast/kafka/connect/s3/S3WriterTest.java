@@ -1,6 +1,7 @@
 package com.spredfast.kafka.connect.s3;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.isA;
@@ -14,8 +15,9 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.util.Arrays;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.function.Supplier;
 
 import org.apache.kafka.common.TopicPartition;
 import org.junit.Before;
@@ -36,38 +38,35 @@ import com.spredfast.kafka.connect.s3.sink.S3Writer;
  * how well I can mock S3 API beyond a certain point.
  */
 public class S3WriterTest {
-	private static final Layout.Builder LAYOUT_BUILDER = new GroupedByDateLayout(new CurrentUtcDateSupplier())
-			.getBuilder();
+	private static final Supplier<String> DATE_SUPPLIER = new CurrentUtcDateSupplier();
 
-	private String testBucket = "kafka-connect-s3-unit-test";
-	private String tmpDirPrefix = "S3WriterTest";
-	private File tmpDir;
+	final private String testBucket = "kafka-connect-s3-unit-test";
+	final private File tmpDir;
 
 	public S3WriterTest() {
 
 		String tempDir = System.getProperty("java.io.tmpdir");
+		String tmpDirPrefix = "S3WriterTest";
 		this.tmpDir = new File(tempDir, tmpDirPrefix);
 
 		System.out.println("Temp dir for writer test is: " + tmpDir);
 	}
 
 	@Before
-	public void setUp() throws Exception {
-		if (!tmpDir.exists()) {
-			tmpDir.mkdir();
-		}
+	public void setUp() {
+		assertTrue(tmpDir.exists() || tmpDir.mkdir());
 	}
 
-	private BlockGZIPFileWriter createDummmyFiles(long offset, int numRecords) throws Exception {
+	private BlockGZIPFileWriter createDummyFiles(long offset, int numRecords) throws Exception {
 		BlockGZIPFileWriter writer = new BlockGZIPFileWriter(tmpDir, offset);
 		for (int i = 0; i < numRecords; i++) {
-			writer.write(Arrays.asList(String.format("Record %d", i).getBytes()), 1);
+			writer.write(List.of(String.format("Record %d", i).getBytes()), 1);
 		}
 		writer.close();
 		return writer;
 	}
 
-	class ExpectedRequestParams {
+	static class ExpectedRequestParams {
 		public String key;
 		public String bucket;
 
@@ -86,9 +85,9 @@ public class S3WriterTest {
 		List<String> bucketArgs = bucketCaptor.getAllValues();
 		List<String> keyArgs = keyCaptor.getAllValues();
 
-		for (int i = 0; i < expect.length; i++) {
-			assertEquals(expect[i].bucket, bucketArgs.remove(0));
-			assertEquals(expect[i].key, keyArgs.remove(0));
+		for (ExpectedRequestParams expectedRequestParams : expect) {
+			assertEquals(expectedRequestParams.bucket, bucketArgs.remove(0));
+			assertEquals(expectedRequestParams.key, keyArgs.remove(0));
 		}
 	}
 
@@ -102,7 +101,7 @@ public class S3WriterTest {
 		assertEquals(key, req.getKey());
 		assertEquals(this.testBucket, req.getBucketName());
 
-		InputStreamReader input = new InputStreamReader(req.getInputStream(), "UTF-8");
+		InputStreamReader input = new InputStreamReader(req.getInputStream(), StandardCharsets.UTF_8);
 		StringBuilder sb = new StringBuilder(1024);
 		final char[] buffer = new char[1024];
 		try {
@@ -117,82 +116,118 @@ public class S3WriterTest {
 		assertEquals(content, sb.toString());
 	}
 
-	private String getKeyForFilename(String prefix, String topic, int partition, long startOffset, String extension) {
+	private String getKeyForFilename(Layout.Builder layoutBuilder, String prefix, String topic, int partition, long startOffset, String extension) {
 		final TopicPartition topicPartition = new TopicPartition(topic, partition);
 		final BlockMetadata blockMetadata = new BlockMetadata(topicPartition, startOffset);
-		return String.format("%s/%s%s", prefix, LAYOUT_BUILDER.buildBlockPath(blockMetadata), extension);
+		return String.format("%s/%s%s", prefix, layoutBuilder.buildBlockPath(blockMetadata), extension);
+	}
+
+	private String getKeyForIndex(Layout.Builder layoutBuilder, String topic) {
+		final TopicPartition topicPartition = new TopicPartition(topic, 0);
+		return String.format("%s/%s", "pfx", layoutBuilder.buildIndexPath(topicPartition));
 	}
 
 	@Test
-	public void testUpload() throws Exception {
+	public void testUploadGroupedByDate() throws Exception {
+		testUpload(new GroupedByDateLayout(DATE_SUPPLIER));
+	}
+
+	@Test
+	public void testUploadGroupedByTopic() throws Exception {
+		testUpload(new GroupedByTopicLayout(DATE_SUPPLIER));
+	}
+
+	private void testUpload(Layout layout) throws Exception {
 		AmazonS3 s3Mock = mock(AmazonS3.class);
+		Layout.Builder layoutBuilder = layout.getBuilder();
 		TransferManager tmMock = mock(TransferManager.class);
-		BlockGZIPFileWriter fileWriter = createDummmyFiles(0, 1000);
-		S3Writer s3Writer = new S3Writer(testBucket, "pfx", LAYOUT_BUILDER, s3Mock, tmMock);
-		TopicPartition tp = new TopicPartition("bar", 0);
+		try (BlockGZIPFileWriter fileWriter = createDummyFiles(0, 1000)) {
+			S3Writer s3Writer = new S3Writer(testBucket, "pfx", layoutBuilder, s3Mock, tmMock);
+			TopicPartition tp = new TopicPartition("bar", 0);
 
-		Upload mockUpload = mock(Upload.class);
+			Upload mockUpload = mock(Upload.class);
 
-		String dataKey = getKeyForFilename("pfx", "bar", 0, 0, ".gz");
-		String indexKey = getKeyForFilename("pfx", "bar", 0, 0, ".index.json");
+			String dataKey = getKeyForFilename(layoutBuilder, "pfx", "bar", 0, 0, ".gz");
+			String indexKey = getKeyForFilename(layoutBuilder, "pfx", "bar", 0, 0, ".index.json");
 
-		when(tmMock.upload(eq(testBucket), eq(dataKey), isA(File.class)))
-			.thenReturn(mockUpload);
-		when(tmMock.upload(eq(testBucket), eq(indexKey), isA(File.class)))
-			.thenReturn(mockUpload);
+			when(tmMock.upload(eq(testBucket), eq(dataKey), isA(File.class)))
+					.thenReturn(mockUpload);
+			when(tmMock.upload(eq(testBucket), eq(indexKey), isA(File.class)))
+					.thenReturn(mockUpload);
 
-		s3Writer.putChunk(fileWriter.getDataFile(), fileWriter.getIndexFile(), new BlockMetadata(tp, fileWriter.getStartOffset()));
+			s3Writer.putChunk(fileWriter.getDataFile(), fileWriter.getIndexFile(), new BlockMetadata(tp, fileWriter.getStartOffset()));
 
-		verifyTMUpload(tmMock, new ExpectedRequestParams[]{
-			new ExpectedRequestParams(dataKey, testBucket),
-			new ExpectedRequestParams(indexKey, testBucket)
-		});
+			verifyTMUpload(tmMock, new ExpectedRequestParams[]{
+					new ExpectedRequestParams(dataKey, testBucket),
+					new ExpectedRequestParams(indexKey, testBucket)
+			});
 
-		// Verify it also wrote the index file key
-		verifyStringPut(s3Mock, "pfx/last_chunk_index.bar-00000.txt", indexKey);
+			// Verify it also wrote the index file key
+			verifyStringPut(s3Mock, getKeyForIndex(layoutBuilder, "bar"), indexKey);
+		}
 	}
 
 	private S3Object makeMockS3Object(String key, String contents) throws Exception {
 		S3Object mock = new S3Object();
 		mock.setBucketName(this.testBucket);
 		mock.setKey(key);
-		InputStream stream = new ByteArrayInputStream(contents.getBytes("UTF-8"));
+		InputStream stream = new ByteArrayInputStream(contents.getBytes(StandardCharsets.UTF_8));
 		mock.setObjectContent(stream);
 		System.out.println("MADE MOCK FOR " + key + " WITH BODY: " + contents);
 		return mock;
 	}
 
 	@Test
-	public void testFetchOffsetNewTopic() throws Exception {
+	public void testFetchOffsetNewTopicGroupedByDate() throws Exception {
+		testFetchOffsetNewTopic(new GroupedByDateLayout(DATE_SUPPLIER));
+	}
+
+	@Test
+	public void testFetchOffsetNewTopicGroupedByTopic() throws Exception {
+		testFetchOffsetNewTopic(new GroupedByTopicLayout(DATE_SUPPLIER));
+	}
+
+	private void testFetchOffsetNewTopic(Layout layout) throws Exception {
 		AmazonS3 s3Mock = mock(AmazonS3.class);
-		S3Writer s3Writer = new S3Writer(testBucket, "pfx", LAYOUT_BUILDER, s3Mock);
+		Layout.Builder layoutBuilder = layout.getBuilder();
+		S3Writer s3Writer = new S3Writer(testBucket, "pfx", layoutBuilder, s3Mock);
 
 		// Non existing topic should return 0 offset
 		// Since the file won't exist. code will expect the initial fetch to 404
 		AmazonS3Exception ase = new AmazonS3Exception("The specified key does not exist.");
 		ase.setStatusCode(404);
-		when(s3Mock.getObject(eq(testBucket), eq("pfx/last_chunk_index.new_topic-00000.txt")))
+		when(s3Mock.getObject(eq(testBucket), eq(getKeyForIndex(layoutBuilder, "new_topic"))))
 			.thenThrow(ase)
 			.thenReturn(null);
 
 		TopicPartition tp = new TopicPartition("new_topic", 0);
 		long offset = s3Writer.fetchOffset(tp);
 		assertEquals(0, offset);
-		verify(s3Mock).getObject(eq(testBucket), eq("pfx/last_chunk_index.new_topic-00000.txt"));
+		verify(s3Mock).getObject(eq(testBucket), eq(getKeyForIndex(layoutBuilder, "new_topic")));
 	}
 
 	@Test
-	public void testFetchOffsetExistingTopic() throws Exception {
+	public void testFetchOffsetExistingTopicGroupedByDate() throws Exception {
+		testFetchOffsetExistingTopic(new GroupedByDateLayout(DATE_SUPPLIER));
+	}
+
+	@Test
+	public void testFetchOffsetExistingTopicGroupedByTopic() throws Exception {
+		testFetchOffsetExistingTopic(new GroupedByTopicLayout(DATE_SUPPLIER));
+	}
+
+	private void testFetchOffsetExistingTopic(Layout layout) throws Exception {
 		AmazonS3 s3Mock = mock(AmazonS3.class);
-		S3Writer s3Writer = new S3Writer(testBucket, "pfx", LAYOUT_BUILDER, s3Mock);
+		Layout.Builder layoutBuilder = layout.getBuilder();
+		S3Writer s3Writer = new S3Writer(testBucket, "pfx", layoutBuilder, s3Mock);
 		// Existing topic should return correct offset
 		// We expect 2 fetches, one for the cursor file
 		// and second for the index file itself
-		String indexKey = getKeyForFilename("pfx", "bar", 0, 10042, ".index.json");
+		String indexKey = getKeyForFilename(layoutBuilder, "pfx", "bar", 0, 10042, ".index.json");
 
-		when(s3Mock.getObject(eq(testBucket), eq("pfx/last_chunk_index.bar-00000.txt")))
+		when(s3Mock.getObject(eq(testBucket), eq(getKeyForIndex(layoutBuilder, "bar"))))
 			.thenReturn(
-				makeMockS3Object("pfx/last_chunk_index.bar-00000.txt", indexKey)
+				makeMockS3Object(getKeyForIndex(layoutBuilder, "bar"), indexKey)
 			);
 
 		when(s3Mock.getObject(eq(testBucket), eq(indexKey)))
@@ -211,7 +246,7 @@ public class S3WriterTest {
 		TopicPartition tp = new TopicPartition("bar", 0);
 		long offset = s3Writer.fetchOffset(tp);
 		assertEquals(12031 + 34, offset);
-		verify(s3Mock).getObject(eq(testBucket), eq("pfx/last_chunk_index.bar-00000.txt"));
+		verify(s3Mock).getObject(eq(testBucket), eq(getKeyForIndex(layoutBuilder, "bar")));
 		verify(s3Mock).getObject(eq(testBucket), eq(indexKey));
 
 	}
