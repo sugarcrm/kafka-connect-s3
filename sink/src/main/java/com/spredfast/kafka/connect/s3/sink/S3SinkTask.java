@@ -82,9 +82,6 @@ public class S3SinkTask extends SinkTask {
         .map(Long::parseLong)
         .ifPresent(flushIntervalMs -> this.flushIntervalMs = flushIntervalMs);
 
-    log.info("{} compressed_file_size: {}", name(), GZIPFileThreshold);
-    log.info("{} flush.interval.ms: {}", name(), flushIntervalMs);
-
     recordFormat = Configure.createFormat(props);
 
     keyConverter = ofNullable(Configure.buildConverter(config, "key.converter", true, null));
@@ -128,8 +125,7 @@ public class S3SinkTask extends SinkTask {
       Map<TopicPartition, OffsetAndMetadata> currentOffsets) {
     Map<TopicPartition, OffsetAndMetadata> result = new HashMap<>();
 
-    log.info("{} performing preCommit", name());
-    log.info("{} offsets: {}", name(), currentOffsets);
+    log.debug("{} performing preCommit with offsets: {}", name(), currentOffsets);
 
     currentOffsets.entrySet().stream()
         .filter(
@@ -140,16 +136,15 @@ public class S3SinkTask extends SinkTask {
         .forEach(
             e -> {
               BlockGZIPFileWriter blockWriter = partitions.get(e.getKey()).getWriter();
-              log.info(
-                  "{} partition: {}, totalCompressedSize: {}",
+              log.debug(
+                  "{} preparing offsets for partition: {}, totalCompressedSize: {}",
                   name(),
-                  e.getValue(),
+                  e.getKey(),
                   blockWriter.getTotalCompressedSize());
               result.put(e.getKey(), e.getValue());
             });
 
     if (!result.isEmpty()) {
-      log.info("{} result: {}", name(), result);
       flush(result);
     }
 
@@ -165,7 +160,7 @@ public class S3SinkTask extends SinkTask {
               long firstOffset = rs.get(0).kafkaOffset();
               long lastOffset = rs.get(rs.size() - 1).kafkaOffset();
 
-              log.info(
+              log.debug(
                   "{} received {} records for {} to archive. Last offset {}",
                   name(),
                   rs.size(),
@@ -182,7 +177,7 @@ public class S3SinkTask extends SinkTask {
   public void flush(Map<TopicPartition, OffsetAndMetadata> offsets) throws ConnectException {
     Metrics.StopTimer timer = metrics.time("flush", tags);
 
-    log.debug("{} flushing offsets", name());
+    log.debug("{} flushing offsets: {}", name(), offsets);
 
     // XXX the docs for flush say that the offsets given are the same as if we tracked the offsets
     // of the records given to put, so we should just write whatever we have in our files
@@ -268,23 +263,23 @@ public class S3SinkTask extends SinkTask {
       long timeSinceLastFlush = Instant.now().toEpochMilli() - lastFlush;
       boolean doPeriodicFlush = timeSinceLastFlush >= flushIntervalMs;
       if (doPeriodicFlush) {
-        log.info("{} performing a periodic flush on {}", name(), tp);
+        log.debug("{} performing a periodic flush on {}", name(), tp);
       }
 
       boolean doFileSizeFlush = writer.getTotalCompressedSize() > GZIPFileThreshold;
-      log.info(
+      log.debug(
           "{} {} total uncompressed size: {}",
           name(),
           writer.getDataFile().getName(),
           writer.getTotalUncompressedSize());
-      log.info(
+      log.debug(
           "{} {} total compressed size: {}",
           name(),
           writer.getDataFile().getName(),
           writer.getTotalCompressedSize());
 
       if (doFileSizeFlush) {
-        log.info("{} performing a file size flush on {}", name(), tp);
+        log.debug("{} performing a file size flush on {}", name(), tp);
       }
       return doPeriodicFlush || doFileSizeFlush;
     }
@@ -340,7 +335,6 @@ public class S3SinkTask extends SinkTask {
         }
         final BlockMetadata blockMetadata = new BlockMetadata(tp, writer.getStartOffset());
         s3.putChunk(writer.getDataFile(), writer.getIndexFile(), blockMetadata);
-        log.info("Successfully uploaded chunk for " + tp);
       } catch (IOException e) {
         throw new RetriableException("Error flushing " + tp, e);
       }
