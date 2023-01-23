@@ -6,6 +6,7 @@ import static java.util.stream.Collectors.toList;
 
 import java.io.File;
 import java.io.IOException;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
@@ -46,7 +47,9 @@ public class S3SinkTask extends SinkTask {
 
 	private long GZIPChunkThreshold = 67108864;
 
-	private long GZIPThreshold =     104857600;
+	private long GZIPFileThreshold = 104857600;
+
+	private long flushIntervalMs = 43200000;
 
 	private S3Writer s3;
 
@@ -73,7 +76,13 @@ public class S3SinkTask extends SinkTask {
 			this.GZIPChunkThreshold = chunkThreshold);
 
 		configGet("compressed_file_size").map(Long::parseLong).ifPresent(gzipThreshold ->
-			this.GZIPThreshold = gzipThreshold);
+			this.GZIPFileThreshold = gzipThreshold);
+
+		configGet("flush.interval.ms").map(Long::parseLong).ifPresent(flushIntervalMs ->
+			this.flushIntervalMs = flushIntervalMs);
+
+		log.info("{} compressed_file_size: {}", name(), GZIPFileThreshold);
+		log.info("{} flush.interval.ms: {}", name(), flushIntervalMs);
 
 		recordFormat = Configure.createFormat(props);
 
@@ -119,14 +128,13 @@ public class S3SinkTask extends SinkTask {
 
 		log.info("{} performing preCommit", name());
 		log.info("{} offsets: {}", name(), currentOffsets);
-		log.info("{} compressed_file_size: {}", name(), GZIPThreshold);
 
-		partitions.entrySet().stream()
-			.filter(e -> e.getValue() != null && e.getValue().getWriter() != null && e.getValue().getWriter().getTotalCompressedSize() > GZIPThreshold)
+		currentOffsets.entrySet().stream()
+			.filter(e -> e.getValue() != null && partitions.get(e.getKey()) != null && partitions.get(e.getKey()).shouldBeDone())
 			.forEach(e -> {
-				BlockGZIPFileWriter blockWriter = e.getValue().getWriter();
+				BlockGZIPFileWriter blockWriter = partitions.get(e.getKey()).getWriter();
 				log.info("{} partition: {}, totalCompressedSize: {}", name(), e.getValue(), blockWriter.getTotalCompressedSize());
-				result.put(e.getKey(), currentOffsets.get(e.getKey()));
+				result.put(e.getKey(), e.getValue());
 			});
 
 		if (!result.isEmpty()) {
@@ -143,7 +151,7 @@ public class S3SinkTask extends SinkTask {
 			long firstOffset = rs.get(0).kafkaOffset();
 			long lastOffset = rs.get(rs.size() - 1).kafkaOffset();
 
-			log.debug("{} received {} records for {} to archive. Last offset {}", name(), rs.size(), tp,
+			log.info("{} received {} records for {} to archive. Last offset {}", name(), rs.size(), tp,
 				lastOffset);
 
 			PartitionWriter writer = partitions.computeIfAbsent(tp,
@@ -202,6 +210,7 @@ public class S3SinkTask extends SinkTask {
 		private final Map<String, String> tags;
 		private boolean finished;
 		private boolean closed;
+		private long lastFlush;
 
 		private PartitionWriter(TopicPartition tp, long firstOffset) throws IOException {
 			this.tp = tp;
@@ -221,10 +230,28 @@ public class S3SinkTask extends SinkTask {
 			this.tags = writerTags;
 
 			writer = new BlockGZIPFileWriter(directory, firstOffset, GZIPChunkThreshold, format.init(tp.topic(), tp.partition(), firstOffset));
+			lastFlush = Instant.now().toEpochMilli();
 		}
 
 		public BlockGZIPFileWriter getWriter() {
 			return writer;
+		}
+
+		public boolean shouldBeDone() {
+			long timeSinceLastFlush = Instant.now().toEpochMilli() - lastFlush;
+			boolean doPeriodicFlush = timeSinceLastFlush >= flushIntervalMs;
+			if (doPeriodicFlush) {
+				log.info("{} performing a periodic flush on {}", name(), tp);
+			}
+
+			boolean doFileSizeFlush = writer.getTotalCompressedSize() > GZIPFileThreshold;
+			log.info("{} {} total uncompressed size: {}", name(), writer.getDataFile().getName(), writer.getTotalUncompressedSize());
+			log.info("{} {} total compressed size: {}", name(), writer.getDataFile().getName(), writer.getTotalCompressedSize());
+
+			if (doFileSizeFlush) {
+				log.info("{} performing a file size flush on {}", name(), tp);
+			}
+			return doPeriodicFlush || doFileSizeFlush;
 		}
 
 		private void writeAll(Collection<SinkRecord> records) {
@@ -262,6 +289,7 @@ public class S3SinkTask extends SinkTask {
 				}
 				final BlockMetadata blockMetadata = new BlockMetadata(tp, writer.getStartOffset());
 				s3.putChunk(writer.getDataFile(), writer.getIndexFile(), blockMetadata);
+				log.info("Successfully uploaded chunk for " + tp);
 			} catch (IOException e) {
 				throw new RetriableException("Error flushing " + tp, e);
 			}
