@@ -65,7 +65,7 @@ public class S3SinkConnectorIT {
 		.withNetwork(network)
 		.withKafka(kafkaContainer)
 		.withLogConsumer(new Slf4jLogConsumer(LOGGER))
-		.withEnv("OFFSET_FLUSH_INTERVAL_MS", "3000")
+		.withEnv("OFFSET_FLUSH_INTERVAL_MS", "5000")
 		.withEnv("CONNECT_CONSUMER_METADATA_MAX_AGE_MS", "1000")
 		.dependsOn(kafkaContainer);
 
