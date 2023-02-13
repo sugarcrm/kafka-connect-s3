@@ -82,5 +82,29 @@ ext {
 	pomDesc = 'S3 Source and Sink Connectors for Kafka Connect'
 }
 
-// TODO: Rewrite upload.gradle to use the maven-publish plugin
-// apply from: 'upload.gradle'
+publishing {
+	publications {
+		maven(MavenPublication) {
+			groupId = 'com.spredfast.kafka.connect.s3'
+			artifactId = 'kafka-connect-s3'
+
+			from components.java
+
+			pom {
+				name = 'Kafka Connect S3'
+				description = 'S3 Source and Sink Connectors for Kafka Connect'
+			}
+		}
+	}
+
+	repositories {
+		maven {
+			credentials {
+				username = System.getenv("MAVEN_USERNAME")
+				password = System.getenv("MAVEN_PASSWORD")
+			}
+
+			url = "https://nexus.k8s-use1.ea.prod.sugar.build/repository/cxp-public/"
+		}
+	}
+}

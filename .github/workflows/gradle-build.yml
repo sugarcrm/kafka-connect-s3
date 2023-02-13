@@ -22,4 +22,7 @@ jobs:
         uses: gradle/gradle-build-action@v2
 
       - name: Run Tests
+        env:
+          MAVEN_USERNAME: user
+          MAVEN_PASSWORD: password
         run: ./gradlew test
