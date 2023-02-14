@@ -8,16 +8,36 @@ plugins {
 
 description = "kafka-connect-s3"
 
-allprojects  {
-  apply plugin: 'idea'
-  apply plugin: 'maven-publish'
+allprojects {
+	apply plugin: 'idea'
+	apply plugin: 'maven-publish'
 
-  group = 'com.spredfast.kafka.connect.s3'
-  version = '1.0.8'
+	group = 'com.spredfast.kafka.connect.s3'
+	version = '1.0.8'
 
-  apply plugin: 'java-library'
-  sourceCompatibility = 11
-  targetCompatibility = 11
+	apply plugin: 'java-library'
+	sourceCompatibility = 11
+	targetCompatibility = 11
+
+	dependencies {
+		constraints {
+			api("com.amazonaws:aws-java-sdk-s3:1.12.351")
+			api("org.apache.kafka:connect-api:2.8.0")
+
+			testImplementation("junit:junit:4.13.2")
+			testImplementation("com.google.guava:guava:31.1-jre")
+			testImplementation("javax.xml.bind:jaxb-api:2.4.0-b180830.0359")
+
+			testImplementation("io.debezium:debezium-testing-testcontainers:2.0.0.Final")
+			testImplementation("net.mguenther.kafka:kafka-junit:3.3.0")
+			testImplementation("org.testcontainers:kafka:1.17.6")
+			testImplementation("org.testcontainers:localstack:1.17.6")
+		}
+	}
+
+	repositories {
+		maven { url "https://repo.maven.apache.org/maven2" }
+	}
 
 	apply plugin: "com.diffplug.spotless"
 	spotless {
@@ -28,18 +48,14 @@ allprojects  {
 			formatAnnotations()
 		}
 	}
-
-  repositories {
-    maven { url "https://repo.maven.apache.org/maven2" }
-  }
 }
 
 apply plugin: "com.github.johnrengelman.shadow"
 shadowJar {
 	dependencies {
 		// provided in the connect classpath
-		exclude(dependency('org.apache.kafka:connect-api:2.8.0'))
-		exclude(dependency('org.apache.kafka:kafka-clients:2.8.0'))
+		exclude(dependency('org.apache.kafka:connect-api'))
+		exclude(dependency('org.apache.kafka:kafka-clients'))
 		exclude(dependency('net.jpountz.lz4:.*:.*'))
 		exclude(dependency('org.xerial.snappy:.*:.*'))
 		exclude(dependency('org.slf4j:.*:.*'))
