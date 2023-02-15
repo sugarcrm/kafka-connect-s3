@@ -5,8 +5,8 @@ apply plugin: "com.github.johnrengelman.shadow"
 shadowJar {
 	dependencies {
 		// provided in the connect classpath
-		exclude(dependency('org.apache.kafka:connect-api:2.8.0'))
-		exclude(dependency('org.apache.kafka:kafka-clients:2.8.0'))
+		exclude(dependency('org.apache.kafka:connect-api'))
+		exclude(dependency('org.apache.kafka:kafka-clients'))
 		exclude(dependency('net.jpountz.lz4:.*:.*'))
 		exclude(dependency('org.xerial.snappy:.*:.*'))
 		exclude(dependency('org.slf4j:.*:.*'))
@@ -26,10 +26,10 @@ tasks.test.dependsOn tasks.shadowJar
 dependencies {
     implementation project(':common')
 
-    testImplementation group: 'junit', name: 'junit', version: '4.13.2'
-	testImplementation group: 'io.debezium', name: 'debezium-testing-testcontainers', version: '2.0.0.Final'
-	testImplementation group: 'org.testcontainers', name: 'kafka', version: '1.17.6'
-	testImplementation group: 'org.testcontainers', name: 'localstack', version: '1.17.6'
-    testImplementation group: 'org.mockito', name: 'mockito-core', version: '4.9.0'
-	testImplementation group: 'net.mguenther.kafka', name: 'kafka-junit', version: '3.3.0'
+	testImplementation("junit:junit")
+	testImplementation("org.mockito:mockito-core:4.9.0")
+	testImplementation("io.debezium:debezium-testing-testcontainers")
+	testImplementation("net.mguenther.kafka:kafka-junit")
+	testImplementation("org.testcontainers:kafka")
+	testImplementation("org.testcontainers:localstack")
 }

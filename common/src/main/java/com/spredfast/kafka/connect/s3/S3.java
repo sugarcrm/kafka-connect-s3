@@ -9,26 +9,27 @@ import java.util.Map;
 
 public class S3 {
 
-	public static AmazonS3 s3client(Map<String, String> config) {
-		boolean s3PathStyle = Boolean.parseBoolean(config.get("s3.path_style"));
-		String s3Endpoint = config.get("s3.endpoint");
+  public static AmazonS3 s3client(Map<String, String> config) {
+    boolean s3PathStyle = Boolean.parseBoolean(config.get("s3.path_style"));
+    String s3Endpoint = config.get("s3.endpoint");
 
-		AmazonS3 s3Client;
-		if (s3Endpoint == null || s3Endpoint.equals("")) {
-			s3Client = AmazonS3ClientBuilder
-				.standard()
-				.withPathStyleAccessEnabled(s3PathStyle)
-				.build();
-		} else {
-			// Testing with localstack
-			s3Client = AmazonS3ClientBuilder
-				.standard()
-				.withEndpointConfiguration(new EndpointConfiguration(config.get("s3.endpoint"), config.get("region")))
-				.withCredentials(new AWSStaticCredentialsProvider(new BasicAWSCredentials(config.get("aws.accessKeyId"), config.get("aws.secretAccessKey"))))
-				.withPathStyleAccessEnabled(s3PathStyle)
-				.build();
-		}
+    AmazonS3 s3Client;
+    if (s3Endpoint == null || "".equals(s3Endpoint)) {
+      s3Client = AmazonS3ClientBuilder.standard().withPathStyleAccessEnabled(s3PathStyle).build();
+    } else {
+      // Testing with localstack
+      s3Client =
+          AmazonS3ClientBuilder.standard()
+              .withEndpointConfiguration(
+                  new EndpointConfiguration(config.get("s3.endpoint"), config.get("region")))
+              .withCredentials(
+                  new AWSStaticCredentialsProvider(
+                      new BasicAWSCredentials(
+                          config.get("aws.accessKeyId"), config.get("aws.secretAccessKey"))))
+              .withPathStyleAccessEnabled(s3PathStyle)
+              .build();
+    }
 
-		return s3Client;
-	}
+    return s3Client;
+  }
 }

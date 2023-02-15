@@ -4,18 +4,18 @@ import org.apache.kafka.common.TopicPartition;
 
 public interface Layout {
 
-    Builder getBuilder();
+  Builder getBuilder();
 
-    Parser getParser();
+  Parser getParser();
 
-    interface Builder {
+  interface Builder {
 
-        String buildBlockPath(BlockMetadata blockMetadata);
+    String buildBlockPath(BlockMetadata blockMetadata);
 
-        String buildIndexPath(TopicPartition topicPartition);
-    }
+    String buildIndexPath(TopicPartition topicPartition);
+  }
 
-    interface Parser {
-        BlockMetadata parseBlockPath(String path) throws IllegalArgumentException;
-    }
+  interface Parser {
+    BlockMetadata parseBlockPath(String path) throws IllegalArgumentException;
+  }
 }
