@@ -196,7 +196,7 @@ mvn -s ~/.m2/settings.xml deploy:deploy-file -DgroupId=${groupId} \
     -Dfile=kafka-connect-s3-${version}.jar \
     -DgeneratePom=true \
     -DrepositoryId=${repositoryId} \
-    -Durl=http://nexus.k8s-use1.ea.prod.sugar.build/repository/cxp-public/
+    -Durl=https://nexus.service.sugarcrm.com/repository/cxp-public/
 ```
 ### Settings
 
