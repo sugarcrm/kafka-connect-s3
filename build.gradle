@@ -120,7 +120,7 @@ publishing {
 				password = System.getenv("MAVEN_PASSWORD")
 			}
 
-			url = "https://nexus.k8s-use1.ea.prod.sugar.build/repository/cxp-public/"
+			url = "https://nexus.service.sugarcrm.com/repository/cxp-public/"
 		}
 	}
 }
