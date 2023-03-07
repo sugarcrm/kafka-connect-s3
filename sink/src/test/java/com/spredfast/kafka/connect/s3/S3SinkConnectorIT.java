@@ -263,24 +263,23 @@ public class S3SinkConnectorIT {
 
   private static ConnectorConfiguration getConnectorConfiguration(
       String bucketName, String prefix, String topicName) {
-    ConnectorConfiguration connector =
-        ConnectorConfiguration.create()
-            .with("name", "s3-sink")
-            .with("connector.class", "com.spredfast.kafka.connect.s3.sink.S3SinkConnector")
-            .with("key.converter", "org.apache.kafka.connect.storage.StringConverter")
-            .with("local.buffer.dir", "/tmp/connect-system-test")
-            .with("internal.key.converter", "org.apache.kafka.connect.json.JsonConverter")
-            .with("internal.value.converter", "org.apache.kafka.connect.json.JsonConverter")
-            .with("internal.key.converter.schemas.enable", true)
-            .with("internal.value.converter.schemas.enable", true)
-            .with("s3.bucket", bucketName)
-            .with("s3.path_style", true)
-            .with("s3.prefix", prefix)
-            .with("s3.endpoint", "http://localstack:4566")
-            .with("topics", topicName)
-            .with("tasks.max", 1)
-            .with("value.converter", "org.apache.kafka.connect.storage.StringConverter");
-    return connector;
+    return ConnectorConfiguration.create()
+        .with("name", "s3-sink")
+        .with("connector.class", "com.spredfast.kafka.connect.s3.sink.S3SinkConnector")
+        .with("key.converter", "org.apache.kafka.connect.storage.StringConverter")
+        .with("local.buffer.dir", "/tmp/connect-system-test")
+        .with("internal.key.converter", "org.apache.kafka.connect.json.JsonConverter")
+        .with("internal.value.converter", "org.apache.kafka.connect.json.JsonConverter")
+        .with("internal.key.converter.schemas.enable", true)
+        .with("internal.value.converter.schemas.enable", true)
+        .with("s3.region", "us-west-2")
+        .with("s3.endpoint", "http://localstack:4566")
+        .with("s3.bucket", bucketName)
+        .with("s3.prefix", prefix)
+        .with("s3.path_style", true)
+        .with("topics", topicName)
+        .with("tasks.max", 1)
+        .with("value.converter", "org.apache.kafka.connect.storage.StringConverter");
   }
 
   private void deleteConnector(String connector) {
