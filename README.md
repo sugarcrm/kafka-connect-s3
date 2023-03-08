@@ -187,7 +187,7 @@ Pull requests welcome! If you need ideas, check the issues for [open enhancement
 ```sh
 groupId=io.sugarcrm
 artifactId=kafka-connect-s3
-version=1.0.2-all
+version=1.0.9-all
 repositoryId=cxp-nexus
 mvn -s ~/.m2/settings.xml deploy:deploy-file -DgroupId=${groupId} \
     -DartifactId=${artifactId} \
