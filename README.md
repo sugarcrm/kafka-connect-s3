@@ -37,10 +37,6 @@ We made the decision to hard fork when it became clear that we would be responsi
 
 ## Usage
 
-***NOTE***: You want to use the shadow jar produced by this project.
-As a gradle dependency, it is `com.spredfast.kafka.connect.s3:kafka-connect-s3:0.4.0:shadow`.
-The shadow jar ensures there are no conflicts with other libraries.
-
 Use just like any other Connector: add it to the Connect classpath and configure a task. Read the rest of this document for configuration details.
 
 ## Important Configuration
@@ -98,7 +94,7 @@ See the [wiki](https://github.com/spredfast/kafka-connect-s3/wiki) for further d
 
 ## Build and Run
 
-You should be able to build this with `./gradlew shadowJar`. Once the jar is generated in build/libs, include it in `CLASSPATH` (e.g., export `CLASSPATH=.:$CLASSPATH:/fullpath/to/kafka-connect-s3-jar` )
+You should be able to build this with `./gradlew build`. Once the jar is generated in build/libs, include it in `CLASSPATH` (e.g., export `CLASSPATH=.:$CLASSPATH:/fullpath/to/kafka-connect-s3-jar` )
 
 Run: `bin/connect-standalone.sh  example-connect-worker.properties example-connect-s3-sink.properties`(from the root directory of project, make sure you have kafka on the path, if not then give full path of kafka before `bin`)
 
@@ -187,13 +183,13 @@ Pull requests welcome! If you need ideas, check the issues for [open enhancement
 ```sh
 groupId=io.sugarcrm
 artifactId=kafka-connect-s3
-version=1.0.9-all
+version=1.0.9
 repositoryId=cxp-nexus
 mvn -s ~/.m2/settings.xml deploy:deploy-file -DgroupId=${groupId} \
     -DartifactId=${artifactId} \
     -Dversion=${version} \
     -Dpackaging=jar \
-    -Dfile=kafka-connect-s3-${version}.jar \
+    -Dfile=build/libs/kafka-connect-s3-${version}.jar \
     -DgeneratePom=true \
     -DrepositoryId=${repositoryId} \
     -Durl=https://nexus.service.sugarcrm.com/repository/cxp-public/

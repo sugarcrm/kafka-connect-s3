@@ -67,6 +67,6 @@ The same should work with regular ssh for a non-docker machine VM.
 From the repo root dir, run:
 
 ```
-./gradlew shadowJar
+./gradlew build
 python system_test/run.py
 ```
