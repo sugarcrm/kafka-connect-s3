@@ -132,7 +132,7 @@ public class S3SinkTask extends SinkTask {
             e ->
                 e.getValue() != null
                     && partitions.get(e.getKey()) != null
-                    && partitions.get(e.getKey()).shouldBeDone())
+                    && partitions.get(e.getKey()).shouldFlush())
         .forEach(
             e -> {
               BlockGZIPFileWriter blockWriter = partitions.get(e.getKey()).getWriter();
@@ -259,14 +259,14 @@ public class S3SinkTask extends SinkTask {
       return writer;
     }
 
-    public boolean shouldBeDone() {
+    public boolean shouldFlush() {
       long timeSinceLastFlush = Instant.now().toEpochMilli() - lastFlush;
       boolean doPeriodicFlush = timeSinceLastFlush >= flushIntervalMs;
       if (doPeriodicFlush) {
         log.debug("{} performing a periodic flush on {}", name(), tp);
+        return true;
       }
 
-      boolean doFileSizeFlush = writer.getTotalCompressedSize() > GZIPFileThreshold;
       log.debug(
           "{} {} total uncompressed size: {}",
           name(),
@@ -278,10 +278,12 @@ public class S3SinkTask extends SinkTask {
           writer.getDataFile().getName(),
           writer.getTotalCompressedSize());
 
+      boolean doFileSizeFlush = writer.getTotalCompressedSize() > GZIPFileThreshold;
       if (doFileSizeFlush) {
         log.debug("{} performing a file size flush on {}", name(), tp);
+        return true;
       }
-      return doPeriodicFlush || doFileSizeFlush;
+      return false;
     }
 
     private void writeAll(Collection<SinkRecord> records) {
