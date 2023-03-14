@@ -30,7 +30,7 @@ import net.mguenther.kafka.junit.SendValues;
 import net.mguenther.kafka.junit.TopicConfig;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
 import org.awaitility.Awaitility;
-import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -53,10 +53,10 @@ public class S3SinkConnectorIT {
   private AmazonS3 s3;
 
   private static final KafkaContainer kafkaContainer =
-      new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:5.4.3")).withNetwork(network);
+      new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.3.2")).withNetwork(network);
 
   public static LocalStackContainer localStackContainer =
-      new LocalStackContainer(DockerImageName.parse("localstack/localstack:0.11.3"))
+      new LocalStackContainer(DockerImageName.parse("localstack/localstack:0.13.3"))
           .withNetworkAliases("localstack")
           .withNetwork(network)
           .withServices(Service.S3);
@@ -70,7 +70,7 @@ public class S3SinkConnectorIT {
           .withEnv("AWS_ACCESS_KEY_ID", localStackContainer.getAccessKey())
           .withEnv("AWS_SECRET_ACCESS_KEY", localStackContainer.getSecretKey())
           .withEnv("AWS_DEFAULT_REGION", localStackContainer.getRegion())
-          .withEnv("OFFSET_FLUSH_INTERVAL_MS", "5000")
+          .withEnv("OFFSET_FLUSH_INTERVAL_MS", "20000")
           .withEnv("CONNECT_CONSUMER_METADATA_MAX_AGE_MS", "1000")
           .dependsOn(kafkaContainer);
 
@@ -100,18 +100,19 @@ public class S3SinkConnectorIT {
     kafkaCluster = ExternalKafkaCluster.at(kafkaContainer.getBootstrapServers());
   }
 
-  @After
-  public void tearDown() {
+  @AfterClass
+  public static void tearDown() {
     localStackContainer.close();
     kafkaConnectContainer.close();
     kafkaContainer.close();
   }
 
   @Test
-  public void shouldSinkEvents() throws Exception {
-    String bucketName = "connect-system-test";
+  public void testSinkWithGzipFileThreshold() throws Exception {
+    String bucketName = "connect-system-test-size";
     String prefix = "systest";
-    String topicName = "system_test";
+    String topicName = "system_test_size";
+    String connectorName = "s3-sink-size";
     s3.createBucket(bucketName);
 
     // Create the test topic
@@ -119,9 +120,127 @@ public class S3SinkConnectorIT {
 
     // Define, register, and start the connector
     ConnectorConfiguration connectorConfiguration =
-        getConnectorConfiguration(bucketName, prefix, topicName);
-    kafkaConnectContainer.registerConnector("s3-sink", connectorConfiguration);
-    kafkaConnectContainer.ensureConnectorTaskState("s3-sink", 0, State.RUNNING);
+        getConnectorConfiguration(
+            connectorName, bucketName, prefix, topicName, 3000, 250, 12 * 3600 * 1000);
+    kafkaConnectContainer.registerConnector(connectorName, connectorConfiguration);
+    kafkaConnectContainer.ensureConnectorTaskState(connectorName, 0, State.RUNNING);
+
+    // Produce messages to the topic (uncompressed: 3190, compressed: ~340)
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i < 100; i++) {
+      String json = String.format("{{\"foo\": \"bar\", \"counter\": %d}}", i);
+      kafkaCluster.send(SendValues.to(topicName, json));
+      sb.append(json).append("\n");
+    }
+    String expectedDataObjectContents = sb.toString();
+    LocalDate today = LocalDate.now(ZoneOffset.UTC);
+
+    // Wait for the last chunk object
+    final String lastChunkIndexObjectKeyPartition0 =
+        String.format("%s/last_chunk_index.%s-00000.txt", prefix, topicName);
+    Awaitility.await()
+        .pollDelay(1, TimeUnit.SECONDS)
+        .atMost(60, TimeUnit.SECONDS)
+        .until(() -> objectKeyExists(bucketName, lastChunkIndexObjectKeyPartition0));
+
+    // Validate partition 0's last chunk object
+    String indexObjectKey =
+        String.format("%s/%s/%s-00000-000000000000.index.json", prefix, today, topicName);
+    String objectContents = getS3FileOutput(bucketName, lastChunkIndexObjectKeyPartition0);
+    assertEquals(indexObjectKey + "\n", objectContents);
+
+    // Validate partition 0's data object
+    String dataObjectKey =
+        String.format("%s/%s/%s-00000-000000000000.gz", prefix, today, topicName);
+    objectContents = getS3FileOutput(bucketName, dataObjectKey);
+    assertEquals(expectedDataObjectContents, objectContents);
+
+    // Validate partition 0's index object
+    String expectedIndexObjectContents =
+        "{\"chunks\":["
+            + "{\"byte_length_uncompressed\":2998,\"num_records\":94,\"byte_length\":270,\"byte_offset\":0,\"first_record_offset\":0},"
+            + "{\"byte_length_uncompressed\":192,\"num_records\":6,\"byte_length\":69,\"byte_offset\":270,\"first_record_offset\":94}]}\n";
+    objectContents = getS3FileOutput(bucketName, indexObjectKey);
+    assertEquals(expectedIndexObjectContents, objectContents);
+
+    // It's not enough to trigger another flush
+    for (int i = 100; i < 150; i++) {
+      kafkaCluster.send(
+          SendValues.to(topicName, String.format("{{\"foo\": \"bar\", \"counter\": %d}}", i)));
+    }
+
+    // The new index object won't be written as gzip file is not big enough
+    String indexObjectKey2 =
+        String.format("%s/%s/%s-00000-000000000100.index.json", prefix, today, topicName);
+    Awaitility.await()
+        .pollDelay(5, TimeUnit.SECONDS)
+        .during(20, TimeUnit.SECONDS)
+        .atMost(30, TimeUnit.SECONDS)
+        .until(() -> !objectKeyExists(bucketName, indexObjectKey2));
+
+    // Delete the connector
+    deleteConnector(connectorName);
+  }
+
+  @Test
+  public void testSinkWithBigFlushInterval() throws Exception {
+    String bucketName = "connect-system-test-12h";
+    String prefix = "systest";
+    String topicName = "system_test_12h";
+    String connectorName = "s3-sink-12h";
+    s3.createBucket(bucketName);
+
+    // Create the test topic
+    kafkaCluster.createTopic(TopicConfig.withName(topicName).withNumberOfPartitions(1));
+
+    // Define, register, and start the connector
+    ConnectorConfiguration connectorConfiguration =
+        getConnectorConfiguration(connectorName, bucketName, prefix, topicName);
+    kafkaConnectContainer.registerConnector(connectorName, connectorConfiguration);
+    kafkaConnectContainer.ensureConnectorTaskState(connectorName, 0, State.RUNNING);
+
+    // Produce messages to the topic
+    for (int i = 0; i < 100; i++) {
+      String json = String.format("{{\"foo\": \"bar\", \"counter\": %d}}", i);
+      kafkaCluster.send(SendValues.to(topicName, json));
+    }
+    LocalDate today = LocalDate.now(ZoneOffset.UTC);
+
+    // Define the expected files
+    List<String> expectedObjects =
+        List.of(
+            String.format("%s/%s/%s-00000-000000000000.index.json", prefix, today, topicName),
+            String.format("%s/%s/%s-00000-000000000000.gz", prefix, today, topicName),
+            String.format("%s/last_chunk_index.%s-00000.txt", prefix, topicName));
+
+    // Await for all the files to be produced by all tasks
+    Awaitility.await()
+        .pollDelay(5, TimeUnit.SECONDS)
+        .during(20, TimeUnit.SECONDS)
+        .atMost(30, TimeUnit.SECONDS)
+        .until(() -> expectedObjects.stream().noneMatch(key -> objectKeyExists(bucketName, key)));
+
+    // Delete the connector
+    deleteConnector(connectorName);
+  }
+
+  @Test
+  public void testSinkWithRestart() throws Exception {
+    String bucketName = "connect-system-test";
+    String prefix = "systest";
+    String topicName = "system_test";
+    String connectorName = "s3-sink";
+    s3.createBucket(bucketName);
+
+    // Create the test topic
+    kafkaCluster.createTopic(TopicConfig.withName(topicName).withNumberOfPartitions(1));
+
+    // Define, register, and start the connector
+    ConnectorConfiguration connectorConfiguration =
+        getConnectorConfiguration(
+            connectorName, bucketName, prefix, topicName, 67108864, 104857600, 10000);
+    kafkaConnectContainer.registerConnector(connectorName, connectorConfiguration);
+    kafkaConnectContainer.ensureConnectorTaskState(connectorName, 0, State.RUNNING);
 
     // Produce messages to the topic
     StringBuilder sb = new StringBuilder();
@@ -135,20 +254,21 @@ public class S3SinkConnectorIT {
 
     // Wait for the last chunk object
     final String lastChunkIndexObjectKeyPartition0 =
-        prefix + "/last_chunk_index.system_test-00000.txt";
+        String.format("%s/last_chunk_index.%s-00000.txt", prefix, topicName);
     Awaitility.await()
         .pollDelay(1, TimeUnit.SECONDS)
-        .atMost(10, TimeUnit.SECONDS)
+        .atMost(60, TimeUnit.SECONDS)
         .until(() -> objectKeyExists(bucketName, lastChunkIndexObjectKeyPartition0));
 
     // Validate partition 0's last chunk object
     String indexObjectKey =
-        String.format("%s/%s/system_test-00000-000000000000.index.json", prefix, today);
+        String.format("%s/%s/%s-00000-000000000000.index.json", prefix, today, topicName);
     String objectContents = getS3FileOutput(bucketName, lastChunkIndexObjectKeyPartition0);
     assertEquals(indexObjectKey + "\n", objectContents);
 
     // Validate partition 0's data object
-    String dataObjectKey = String.format("%s/%s/system_test-00000-000000000000.gz", prefix, today);
+    String dataObjectKey =
+        String.format("%s/%s/%s-00000-000000000000.gz", prefix, today, topicName);
     objectContents = getS3FileOutput(bucketName, dataObjectKey);
     assertEquals(expectedDataObjectContents, objectContents);
 
@@ -159,7 +279,7 @@ public class S3SinkConnectorIT {
     assertEquals(expectedIndexObjectContents, objectContents);
 
     // Delete the connector
-    deleteConnector("s3-sink");
+    deleteConnector(connectorName);
 
     // Produce messages while the connector is not running
     sb.setLength(0);
@@ -171,15 +291,15 @@ public class S3SinkConnectorIT {
     expectedDataObjectContents = sb.toString();
 
     // Redeploy the connector
-    kafkaConnectContainer.registerConnector("s3-sink", connectorConfiguration);
-    kafkaConnectContainer.ensureConnectorTaskState("s3-sink", 0, State.RUNNING);
+    kafkaConnectContainer.registerConnector(connectorName, connectorConfiguration);
+    kafkaConnectContainer.ensureConnectorTaskState(connectorName, 0, State.RUNNING);
 
     // Await for the new index object to be written
     String indexObjectKey2 =
-        String.format("%s/%s/system_test-00000-000000000100.index.json", prefix, today);
+        String.format("%s/%s/%s-00000-000000000100.index.json", prefix, today, topicName);
     Awaitility.await()
         .pollDelay(1, TimeUnit.SECONDS)
-        .atMost(10, TimeUnit.SECONDS)
+        .atMost(30, TimeUnit.SECONDS)
         .until(() -> objectKeyExists(bucketName, indexObjectKey2));
 
     // Validate partition 0's last chunk object was updated
@@ -187,7 +307,7 @@ public class S3SinkConnectorIT {
     assertEquals(indexObjectKey2 + "\n", objectContents);
 
     // Validate partition 0's data object
-    dataObjectKey = String.format("%s/%s/system_test-00000-000000000100.gz", prefix, today);
+    dataObjectKey = String.format("%s/%s/%s-00000-000000000100.gz", prefix, today, topicName);
     objectContents = getS3FileOutput(bucketName, dataObjectKey);
     assertEquals(expectedDataObjectContents, objectContents);
 
@@ -204,15 +324,14 @@ public class S3SinkConnectorIT {
         "localhost:9092",
         "--alter",
         "--topic",
-        "system_test",
+        topicName,
         "--partitions",
         "3");
-    final int partitionCount = 3;
 
     // Restart the connector to pick up the partition changes
-    deleteConnector("s3-sink");
-    kafkaConnectContainer.registerConnector("s3-sink", connectorConfiguration);
-    kafkaConnectContainer.ensureConnectorTaskState("s3-sink", 0, State.RUNNING);
+    deleteConnector(connectorName);
+    kafkaConnectContainer.registerConnector(connectorName, connectorConfiguration);
+    kafkaConnectContainer.ensureConnectorTaskState(connectorName, 0, State.RUNNING);
 
     for (int i = 200; i < 300; i++) {
       String json = String.format("{{\"foo\": \"bar\", \"counter\": %d}}", i);
@@ -224,47 +343,52 @@ public class S3SinkConnectorIT {
     // Define the expected files
     List<String> expectedObjects =
         List.of(
-            String.format("%s/%s/system_test-00000-000000000200.gz", prefix, today),
-            String.format("%s/%s/system_test-00000-000000000200.index.json", prefix, today),
-            String.format("%s/%s/system_test-00001-000000000000.gz", prefix, today),
-            String.format("%s/%s/system_test-00001-000000000000.index.json", prefix, today),
-            String.format("%s/%s/system_test-00002-000000000000.gz", prefix, today),
-            String.format("%s/%s/system_test-00002-000000000000.index.json", prefix, today),
-            String.format("%s/last_chunk_index.system_test-00000.txt", prefix, today),
-            String.format("%s/last_chunk_index.system_test-00001.txt", prefix, today),
-            String.format("%s/last_chunk_index.system_test-00002.txt", prefix, today));
+            String.format("%s/%s/%s-00000-000000000200.gz", prefix, today, topicName),
+            String.format("%s/%s/%s-00000-000000000200.index.json", prefix, today, topicName),
+            String.format("%s/%s/%s-00001-000000000000.gz", prefix, today, topicName),
+            String.format("%s/%s/%s-00001-000000000000.index.json", prefix, today, topicName),
+            String.format("%s/%s/%s-00002-000000000000.gz", prefix, today, topicName),
+            String.format("%s/%s/%s-00002-000000000000.index.json", prefix, today, topicName),
+            String.format("%s/last_chunk_index.%s-00000.txt", prefix, topicName),
+            String.format("%s/last_chunk_index.%s-00001.txt", prefix, topicName),
+            String.format("%s/last_chunk_index.%s-00002.txt", prefix, topicName));
 
     // Await for all the files to be produced by all tasks
     Awaitility.await()
         .pollDelay(1, TimeUnit.SECONDS)
-        .atMost(10, TimeUnit.SECONDS)
+        .atMost(30, TimeUnit.SECONDS)
         .until(() -> expectedObjects.stream().allMatch(key -> objectKeyExists(bucketName, key)));
 
     // Validate partition 0's index object
     indexObjectKey =
-        String.format("%s/%s/system_test-00000-000000000200.index.json", prefix, today);
+        String.format("%s/%s/%s-00000-000000000200.index.json", prefix, today, topicName);
     objectContents = getS3FileOutput(bucketName, lastChunkIndexObjectKeyPartition0);
     assertEquals(indexObjectKey + "\n", objectContents);
 
-    // Validate partition 0's index object
-    String lastChunkIndexObjectKeyPartition1 = prefix + "/last_chunk_index.system_test-00001.txt";
+    // Validate partition 1's index object
+    String lastChunkIndexObjectKeyPartition1 =
+        String.format("%s/last_chunk_index.%s-00001.txt", prefix, topicName);
     indexObjectKey =
-        String.format("%s/%s/system_test-00001-000000000000.index.json", prefix, today);
+        String.format("%s/%s/%s-00001-000000000000.index.json", prefix, today, topicName);
     objectContents = getS3FileOutput(bucketName, lastChunkIndexObjectKeyPartition1);
     assertEquals(indexObjectKey + "\n", objectContents);
 
-    // Validate partition 0's index object
-    String lastChunkIndexObjectKeyPartition2 = prefix + "/last_chunk_index.system_test-00002.txt";
+    // Validate partition 2's index object
+    String lastChunkIndexObjectKeyPartition2 =
+        String.format("%s/last_chunk_index.%s-00002.txt", prefix, topicName);
     indexObjectKey =
-        String.format("%s/%s/system_test-00002-000000000000.index.json", prefix, today);
+        String.format("%s/%s/%s-00002-000000000000.index.json", prefix, today, topicName);
     objectContents = getS3FileOutput(bucketName, lastChunkIndexObjectKeyPartition2);
     assertEquals(indexObjectKey + "\n", objectContents);
+
+    // Delete the connector
+    deleteConnector(connectorName);
   }
 
   private static ConnectorConfiguration getConnectorConfiguration(
-      String bucketName, String prefix, String topicName) {
+      String connectorName, String bucketName, String prefix, String topicName) {
     return ConnectorConfiguration.create()
-        .with("name", "s3-sink")
+        .with("name", connectorName)
         .with("connector.class", "com.spredfast.kafka.connect.s3.sink.S3SinkConnector")
         .with("key.converter", "org.apache.kafka.connect.storage.StringConverter")
         .with("local.buffer.dir", "/tmp/connect-system-test")
@@ -282,11 +406,25 @@ public class S3SinkConnectorIT {
         .with("value.converter", "org.apache.kafka.connect.storage.StringConverter");
   }
 
+  private static ConnectorConfiguration getConnectorConfiguration(
+      String connectorName,
+      String bucketName,
+      String prefix,
+      String topicName,
+      long chunkThreshold,
+      long gzipThreshold,
+      long flushIntervalMs) {
+    return getConnectorConfiguration(connectorName, bucketName, prefix, topicName)
+        .with("compressed_block_size", chunkThreshold)
+        .with("compressed_file_size", gzipThreshold)
+        .with("flush.interval.ms", flushIntervalMs);
+  }
+
   private void deleteConnector(String connector) {
     kafkaConnectContainer.deleteConnector(connector);
     Awaitility.await()
         .pollDelay(1, TimeUnit.SECONDS)
-        .atMost(5, TimeUnit.SECONDS)
+        .atMost(30, TimeUnit.SECONDS)
         .until(() -> kafkaConnectContainer.getRegisteredConnectors().isEmpty());
   }
 

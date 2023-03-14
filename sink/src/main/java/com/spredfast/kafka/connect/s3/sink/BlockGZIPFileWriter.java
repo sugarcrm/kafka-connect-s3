@@ -243,6 +243,14 @@ public class BlockGZIPFileWriter implements Closeable {
     return totalBytes;
   }
 
+  public int getTotalCompressedSize() {
+    int totalBytes = 0;
+    for (Chunk ch : chunks) {
+      totalBytes += ch.compressedByteLength;
+    }
+    return totalBytes;
+  }
+
   public int getNumChunks() {
     return chunks.size();
   }

@@ -16,6 +16,7 @@ import com.spredfast.kafka.connect.s3.S3RecordFormat;
 import com.spredfast.kafka.connect.s3.S3RecordsWriter;
 import java.io.File;
 import java.io.IOException;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
@@ -44,6 +45,10 @@ public class S3SinkTask extends SinkTask {
 
   private long GZIPChunkThreshold = 67108864;
 
+  private long GZIPFileThreshold = 104857600;
+
+  private long flushIntervalMs = 43200000;
+
   private S3Writer s3;
 
   private Optional<Converter> keyConverter;
@@ -68,6 +73,14 @@ public class S3SinkTask extends SinkTask {
     configGet("compressed_block_size")
         .map(Long::parseLong)
         .ifPresent(chunkThreshold -> this.GZIPChunkThreshold = chunkThreshold);
+
+    configGet("compressed_file_size")
+        .map(Long::parseLong)
+        .ifPresent(gzipThreshold -> this.GZIPFileThreshold = gzipThreshold);
+
+    configGet("flush.interval.ms")
+        .map(Long::parseLong)
+        .ifPresent(flushIntervalMs -> this.flushIntervalMs = flushIntervalMs);
 
     recordFormat = Configure.createFormat(props);
 
@@ -108,6 +121,37 @@ public class S3SinkTask extends SinkTask {
   }
 
   @Override
+  public Map<TopicPartition, OffsetAndMetadata> preCommit(
+      Map<TopicPartition, OffsetAndMetadata> currentOffsets) {
+    Map<TopicPartition, OffsetAndMetadata> result = new HashMap<>();
+
+    log.debug("{} performing preCommit with offsets: {}", name(), currentOffsets);
+
+    currentOffsets.entrySet().stream()
+        .filter(
+            e ->
+                e.getValue() != null
+                    && partitions.get(e.getKey()) != null
+                    && partitions.get(e.getKey()).shouldFlush())
+        .forEach(
+            e -> {
+              BlockGZIPFileWriter blockWriter = partitions.get(e.getKey()).getWriter();
+              log.debug(
+                  "{} preparing offsets for partition: {}, totalCompressedSize: {}",
+                  name(),
+                  e.getKey(),
+                  blockWriter.getTotalCompressedSize());
+              result.put(e.getKey(), e.getValue());
+            });
+
+    if (!result.isEmpty()) {
+      flush(result);
+    }
+
+    return result;
+  }
+
+  @Override
   public void put(Collection<SinkRecord> records) throws ConnectException {
     records.stream()
         .collect(groupingBy(record -> new TopicPartition(record.topic(), record.kafkaPartition())))
@@ -133,7 +177,7 @@ public class S3SinkTask extends SinkTask {
   public void flush(Map<TopicPartition, OffsetAndMetadata> offsets) throws ConnectException {
     Metrics.StopTimer timer = metrics.time("flush", tags);
 
-    log.debug("{} flushing offsets", name());
+    log.debug("{} flushing offsets: {}", name(), offsets);
 
     // XXX the docs for flush say that the offsets given are the same as if we tracked the offsets
     // of the records given to put, so we should just write whatever we have in our files
@@ -182,6 +226,7 @@ public class S3SinkTask extends SinkTask {
     private final Map<String, String> tags;
     private boolean finished;
     private boolean closed;
+    private long lastFlush;
 
     private PartitionWriter(TopicPartition tp, long firstOffset) throws IOException {
       this.tp = tp;
@@ -207,6 +252,38 @@ public class S3SinkTask extends SinkTask {
               firstOffset,
               GZIPChunkThreshold,
               format.init(tp.topic(), tp.partition(), firstOffset));
+      lastFlush = Instant.now().toEpochMilli();
+    }
+
+    public BlockGZIPFileWriter getWriter() {
+      return writer;
+    }
+
+    public boolean shouldFlush() {
+      long timeSinceLastFlush = Instant.now().toEpochMilli() - lastFlush;
+      boolean doPeriodicFlush = timeSinceLastFlush >= flushIntervalMs;
+      if (doPeriodicFlush) {
+        log.debug("{} performing a periodic flush on {}", name(), tp);
+        return true;
+      }
+
+      log.debug(
+          "{} {} total uncompressed size: {}",
+          name(),
+          writer.getDataFile().getName(),
+          writer.getTotalUncompressedSize());
+      log.debug(
+          "{} {} total compressed size: {}",
+          name(),
+          writer.getDataFile().getName(),
+          writer.getTotalCompressedSize());
+
+      boolean doFileSizeFlush = writer.getTotalCompressedSize() > GZIPFileThreshold;
+      if (doFileSizeFlush) {
+        log.debug("{} performing a file size flush on {}", name(), tp);
+        return true;
+      }
+      return false;
     }
 
     private void writeAll(Collection<SinkRecord> records) {
