@@ -43,6 +43,7 @@ import org.testcontainers.containers.localstack.LocalStackContainer.Service;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.lifecycle.Startables;
 import org.testcontainers.utility.DockerImageName;
+import org.testcontainers.utility.MountableFile;
 
 public class S3SinkConnectorIT {
 
@@ -64,6 +65,9 @@ public class S3SinkConnectorIT {
   public static DebeziumContainer kafkaConnectContainer =
       DebeziumContainer.latestStable()
           .withFileSystemBind("build/libs", "/kafka/connect/s3-sink-connector")
+          .withCopyToContainer(
+              MountableFile.forClasspathResource("log4j.properties"),
+              "/kafka/config/log4j.properties")
           .withNetwork(network)
           .withKafka(kafkaContainer)
           .withLogConsumer(new Slf4jLogConsumer(LOGGER))
