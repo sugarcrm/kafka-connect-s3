@@ -1,5 +1,12 @@
 description = "Kafka Connect Sink that writes to S3"
 
+test {
+	testLogging {
+		outputs.upToDateWhen {false}
+		showStandardStreams = true
+	}
+}
+
 apply plugin: "com.github.johnrengelman.shadow"
 
 shadowJar {
@@ -33,4 +40,6 @@ dependencies {
 	testImplementation("net.mguenther.kafka:kafka-junit")
 	testImplementation("org.testcontainers:kafka")
 	testImplementation("org.testcontainers:localstack")
+	testImplementation("ch.qos.logback:logback-core:1.4.5")
+	testImplementation("ch.qos.logback:logback-classic:1.4.5")
 }
