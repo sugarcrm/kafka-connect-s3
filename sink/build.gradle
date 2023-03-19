@@ -1,12 +1,5 @@
 description = "Kafka Connect Sink that writes to S3"
 
-test {
-	testLogging {
-		outputs.upToDateWhen {false}
-		showStandardStreams = true
-	}
-}
-
 apply plugin: "com.github.johnrengelman.shadow"
 
 shadowJar {
@@ -28,7 +21,7 @@ shadowJar {
 }
 
 configurations {
-	sourceConnector
+	extLibs
 }
 
 dependencies {
@@ -43,15 +36,23 @@ dependencies {
 	testImplementation("ch.qos.logback:logback-core:1.4.5")
 	testImplementation("ch.qos.logback:logback-classic:1.4.5")
 
-	sourceConnector project(path: ':source', configuration: 'shadow' )
+	extLibs project(path: ':source', configuration: 'shadow' )
 }
 
 tasks.register('copyLibs', Copy) {
-	from configurations.sourceConnector {
+	from configurations.extLibs {
 		into 'build/libs'
 	}
 }
 
 tasks.build.dependsOn tasks.shadowJar
+
+test {
+	testLogging {
+		outputs.upToDateWhen {false}
+		showStandardStreams = true
+	}
+}
+
 tasks.test.dependsOn tasks.shadowJar, tasks.copyLibs
 

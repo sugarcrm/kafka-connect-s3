@@ -21,7 +21,7 @@ shadowJar {
 }
 
 tasks.build.dependsOn tasks.shadowJar
-tasks.test.dependsOn tasks.shadowJar
+tasks.test.dependsOn(":sink:copyLibs")
 
 dependencies {
 	implementation project(':common')
