@@ -1,5 +1,28 @@
 description = "Kafka Connect Source that reads from S3"
 
+apply plugin: "com.github.johnrengelman.shadow"
+
+shadowJar {
+	dependencies {
+		// provided in the connect classpath
+		exclude(dependency('org.apache.kafka:connect-api'))
+		exclude(dependency('org.apache.kafka:kafka-clients'))
+		exclude(dependency('net.jpountz.lz4:.*:.*'))
+		exclude(dependency('org.xerial.snappy:.*:.*'))
+		exclude(dependency('org.slf4j:.*:.*'))
+	}
+
+	// for things we directly depend on, repackage so we don't conflict with other connectors
+	relocate 'com.amazonaws', 'com.spredfast.shade.amazonaws'
+	relocate 'com.fasterxml', 'com.spredfast.shade.fasterxml'
+	relocate 'org.apache.commons', 'com.spredfast.shade.apache.commons'
+	relocate 'org.apache.http', 'com.spredfast.shade.apache.http'
+	relocate 'org.joda', 'com.spredfast.shade.joda'
+}
+
+tasks.build.dependsOn tasks.shadowJar
+tasks.test.dependsOn(":sink:copyLibs")
+
 dependencies {
 	implementation project(':common')
 

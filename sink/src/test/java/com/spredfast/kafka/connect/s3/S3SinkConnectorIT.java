@@ -1,5 +1,6 @@
 package com.spredfast.kafka.connect.s3;
 
+import static net.mguenther.kafka.junit.ObserveKeyValues.on;
 import static org.junit.Assert.assertEquals;
 
 import com.amazonaws.SdkClientException;
@@ -19,16 +20,20 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import net.mguenther.kafka.junit.ExternalKafkaCluster;
 import net.mguenther.kafka.junit.KeyValue;
+import net.mguenther.kafka.junit.ReadKeyValues;
 import net.mguenther.kafka.junit.SendKeyValues;
 import net.mguenther.kafka.junit.SendValues;
 import net.mguenther.kafka.junit.TopicConfig;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
+import org.apache.commons.lang.StringUtils;
 import org.awaitility.Awaitility;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -389,6 +394,70 @@ public class S3SinkConnectorIT {
     deleteConnector(connectorName);
   }
 
+  @Test
+  public void testSinkWithBinaryFormat() throws Exception {
+    String bucketName = "connect-system-test";
+    String prefix = "binsystest";
+    String sinkTopicName = "binary-system_test";
+    String sinkConnectorName = "s3-sink";
+    s3.createBucket(bucketName);
+
+    // Create the test topic
+    kafkaCluster.createTopic(TopicConfig.withName(sinkTopicName).withNumberOfPartitions(1));
+
+    // Define, register, and start the connector
+    ConnectorConfiguration connectorConfiguration =
+        getConnectorConfiguration(
+                sinkConnectorName, bucketName, prefix, sinkTopicName, 67108864, 104857600, 10000)
+            .with("key.converter", "com.spredfast.kafka.connect.s3.AlreadyBytesConverter")
+            .with("value.converter", "com.spredfast.kafka.connect.s3.AlreadyBytesConverter");
+    kafkaConnectContainer.registerConnector(sinkConnectorName, connectorConfiguration);
+    kafkaConnectContainer.ensureConnectorTaskState(sinkConnectorName, 0, State.RUNNING);
+
+    // Produce messages to the topic
+    List<String> producedMessages = new ArrayList<>();
+    for (int i = 0; i < 100; i++) {
+      String json = String.format("{{\"foo\": \"bar\", \"counter\": %d}}", i);
+      kafkaCluster.send(SendValues.to(sinkTopicName, json));
+      producedMessages.add(json);
+    }
+
+    String expectedDataObjectContents = StringUtils.join(producedMessages, "\n");
+
+    // Wait for the last chunk object
+    final String lastChunkIndexObjectKeyPartition0 =
+        String.format("%s/last_chunk_index.%s-00000.txt", prefix, sinkTopicName);
+    Awaitility.await()
+        .pollDelay(1, TimeUnit.SECONDS)
+        .atMost(60, TimeUnit.SECONDS)
+        .until(() -> objectKeyExists(bucketName, lastChunkIndexObjectKeyPartition0));
+
+    // Delete the sink connector
+    deleteConnector(sinkConnectorName);
+
+    String sourceTopicName = "test-source-output";
+    kafkaCluster.createTopic(TopicConfig.withName(sourceTopicName).withNumberOfPartitions(1));
+
+    String sourceConnectorName = "s3-source";
+    ConnectorConfiguration sourceConnectorConfiguration =
+        getSourceBinaryConnectorConfiguration(
+            sourceConnectorName, bucketName, prefix, sinkTopicName, sourceTopicName);
+
+    kafkaConnectContainer.registerConnector(sourceConnectorName, sourceConnectorConfiguration);
+    kafkaConnectContainer.ensureConnectorTaskState(sourceConnectorName, 0, State.RUNNING);
+    kafkaCluster.observe(on(sourceTopicName, 100));
+    List<String> values =
+        kafkaCluster.read(ReadKeyValues.from(sourceTopicName)).stream()
+            .map(KeyValue::getValue)
+            .collect(Collectors.toList());
+
+    // Delete the connector
+    deleteConnector(sourceConnectorName);
+
+    String actualDataObjectContents = StringUtils.join(values, "\n");
+    assertEquals(expectedDataObjectContents, actualDataObjectContents);
+  }
+
   private static ConnectorConfiguration getConnectorConfiguration(
       String connectorName, String bucketName, String prefix, String topicName) {
     return ConnectorConfiguration.create()
@@ -422,6 +491,32 @@ public class S3SinkConnectorIT {
         .with("compressed_block_size", chunkThreshold)
         .with("compressed_file_size", gzipThreshold)
         .with("flush.interval.ms", flushIntervalMs);
+  }
+
+  private static ConnectorConfiguration getSourceBinaryConnectorConfiguration(
+      String connectorName,
+      String bucketName,
+      String prefix,
+      String sinkTopicName,
+      String sourceTopicName) {
+    return ConnectorConfiguration.create()
+        .with("name", connectorName)
+        .with("connector.class", "com.spredfast.kafka.connect.s3.source.S3SourceConnector")
+        .with("key.converter", "com.spredfast.kafka.connect.s3.AlreadyBytesConverter")
+        .with("value.converter", "com.spredfast.kafka.connect.s3.AlreadyBytesConverter")
+        .with("local.buffer.dir", "/tmp/connect-system-test")
+        .with("internal.key.converter", "org.apache.kafka.connect.json.JsonConverter")
+        .with("internal.value.converter", "org.apache.kafka.connect.json.JsonConverter")
+        .with("internal.key.converter.schemas.enable", true)
+        .with("internal.value.converter.schemas.enable", true)
+        .with("s3.region", "us-west-2")
+        .with("s3.endpoint", "http://localstack:4566")
+        .with("s3.bucket", bucketName)
+        .with("s3.prefix", prefix)
+        .with("s3.path_style", true)
+        // .with("topics", topicName)
+        .with("targetTopic." + sinkTopicName, sourceTopicName)
+        .with("tasks.max", 1);
   }
 
   private void deleteConnector(String connector) {

@@ -1,12 +1,5 @@
 description = "Kafka Connect Sink that writes to S3"
 
-test {
-	testLogging {
-		outputs.upToDateWhen {false}
-		showStandardStreams = true
-	}
-}
-
 apply plugin: "com.github.johnrengelman.shadow"
 
 shadowJar {
@@ -27,12 +20,12 @@ shadowJar {
 	relocate 'org.joda', 'com.spredfast.shade.joda'
 }
 
-tasks.build.dependsOn tasks.shadowJar
-tasks.test.dependsOn tasks.shadowJar
+configurations {
+	extLibs
+}
 
 dependencies {
     implementation project(':common')
-
 	testImplementation("junit:junit")
 	testImplementation("org.awaitility:awaitility:4.2.0")
 	testImplementation("org.mockito:mockito-core:4.9.0")
@@ -42,4 +35,24 @@ dependencies {
 	testImplementation("org.testcontainers:localstack")
 	testImplementation("ch.qos.logback:logback-core:1.4.5")
 	testImplementation("ch.qos.logback:logback-classic:1.4.5")
+
+	extLibs project(path: ':source', configuration: 'shadow' )
 }
+
+tasks.register('copyLibs', Copy) {
+	from configurations.extLibs {
+		into 'build/libs'
+	}
+}
+
+tasks.build.dependsOn tasks.shadowJar
+
+test {
+	testLogging {
+		outputs.upToDateWhen {false}
+		showStandardStreams = true
+	}
+}
+
+tasks.test.dependsOn tasks.shadowJar, tasks.copyLibs
+
