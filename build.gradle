@@ -52,6 +52,7 @@ allprojects {
 
 apply plugin: "com.github.johnrengelman.shadow"
 shadowJar {
+	archiveClassifier = null
 	dependencies {
 		// provided in the connect classpath
 		exclude(dependency('org.apache.kafka:connect-api'))
@@ -100,16 +101,9 @@ ext {
 
 publishing {
 	publications {
-		maven(MavenPublication) {
+		shadow(MavenPublication) { publication ->
+			project.shadow.component(publication)
 			groupId = 'io.sugarcrm'
-			artifactId = 'kafka-connect-s3'
-
-			from components.java
-
-			pom {
-				name = 'Kafka Connect S3'
-				description = 'S3 Source and Sink Connectors for Kafka Connect'
-			}
 		}
 	}
 
