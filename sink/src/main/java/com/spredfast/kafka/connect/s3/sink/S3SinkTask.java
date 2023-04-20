@@ -158,6 +158,7 @@ public class S3SinkTask extends SinkTask {
         .forEach(
             (tp, rs) -> {
               long firstOffset = rs.get(0).kafkaOffset();
+              long firstTimestamp = rs.get(0).timestamp();
               long lastOffset = rs.get(rs.size() - 1).kafkaOffset();
 
               log.debug(
@@ -168,7 +169,7 @@ public class S3SinkTask extends SinkTask {
                   lastOffset);
 
               PartitionWriter writer =
-                  partitions.computeIfAbsent(tp, t -> initWriter(t, firstOffset));
+                  partitions.computeIfAbsent(tp, t -> initWriter(t, firstOffset, firstTimestamp));
               writer.writeAll(rs);
             });
   }
@@ -210,9 +211,9 @@ public class S3SinkTask extends SinkTask {
     // offsets are managed by Connect
   }
 
-  private PartitionWriter initWriter(TopicPartition tp, long offset) {
+  private PartitionWriter initWriter(TopicPartition tp, long offset, long timestamp) {
     try {
-      return new PartitionWriter(tp, offset);
+      return new PartitionWriter(tp, offset, timestamp);
     } catch (IOException e) {
       throw new RetriableException(
           "Error initializing writer for " + tp + " at offset " + offset, e);
@@ -226,9 +227,9 @@ public class S3SinkTask extends SinkTask {
     private final Map<String, String> tags;
     private boolean finished;
     private boolean closed;
-    private long lastFlush;
+    private long firstTimestamp;
 
-    private PartitionWriter(TopicPartition tp, long firstOffset) throws IOException {
+    private PartitionWriter(TopicPartition tp, long firstOffset, long firstTimestamp) throws IOException {
       this.tp = tp;
       format = recordFormat.newWriter();
 
@@ -252,7 +253,7 @@ public class S3SinkTask extends SinkTask {
               firstOffset,
               GZIPChunkThreshold,
               format.init(tp.topic(), tp.partition(), firstOffset));
-      lastFlush = Instant.now().toEpochMilli();
+      this.firstTimestamp = firstTimestamp;
     }
 
     public BlockGZIPFileWriter getWriter() {
@@ -260,8 +261,8 @@ public class S3SinkTask extends SinkTask {
     }
 
     public boolean shouldFlush() {
-      long timeSinceLastFlush = Instant.now().toEpochMilli() - lastFlush;
-      boolean doPeriodicFlush = timeSinceLastFlush >= flushIntervalMs;
+      long timeSinceFirstRecord = Instant.now().toEpochMilli() - firstTimestamp;
+      boolean doPeriodicFlush = timeSinceFirstRecord >= flushIntervalMs;
       if (doPeriodicFlush) {
         log.debug("{} performing a periodic flush on {}", name(), tp);
         return true;
