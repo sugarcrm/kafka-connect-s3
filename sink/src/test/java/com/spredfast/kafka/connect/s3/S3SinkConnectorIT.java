@@ -204,7 +204,14 @@ public class S3SinkConnectorIT {
 
     // Define, register, and start the connector
     ConnectorConfiguration connectorConfiguration =
-        getConnectorConfiguration(connectorName, bucketName, prefix, topicName);
+        getConnectorConfiguration(
+            connectorName,
+            bucketName,
+            prefix,
+            topicName,
+            67108864,
+            100 * 1024 * 1024,
+            12 * 3600 * 1000);
     kafkaConnectContainer.registerConnector(connectorName, connectorConfiguration);
     kafkaConnectContainer.ensureConnectorTaskState(connectorName, 0, State.RUNNING);
 
@@ -246,8 +253,7 @@ public class S3SinkConnectorIT {
 
     // Define, register, and start the connector
     ConnectorConfiguration connectorConfiguration =
-        getConnectorConfiguration(
-            connectorName, bucketName, prefix, topicName, 67108864, 104857600, 10000);
+        getConnectorConfiguration(connectorName, bucketName, prefix, topicName);
     kafkaConnectContainer.registerConnector(connectorName, connectorConfiguration);
     kafkaConnectContainer.ensureConnectorTaskState(connectorName, 0, State.RUNNING);
 
@@ -407,8 +413,7 @@ public class S3SinkConnectorIT {
 
     // Define, register, and start the connector
     ConnectorConfiguration connectorConfiguration =
-        getConnectorConfiguration(
-                sinkConnectorName, bucketName, prefix, sinkTopicName, 67108864, 104857600, 10000)
+        getConnectorConfiguration(sinkConnectorName, bucketName, prefix, sinkTopicName)
             .with("key.converter", "com.spredfast.kafka.connect.s3.AlreadyBytesConverter")
             .with("value.converter", "com.spredfast.kafka.connect.s3.AlreadyBytesConverter");
     kafkaConnectContainer.registerConnector(sinkConnectorName, connectorConfiguration);
