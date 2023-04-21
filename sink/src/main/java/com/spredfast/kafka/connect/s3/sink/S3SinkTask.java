@@ -45,9 +45,9 @@ public class S3SinkTask extends SinkTask {
 
   private long GZIPChunkThreshold = 67108864;
 
-  private long GZIPFileThreshold = 104857600;
+  private long GZIPFileThreshold = -1;
 
-  private long flushIntervalMs = 43200000;
+  private long flushIntervalMs = -1;
 
   private S3Writer s3;
 
@@ -261,8 +261,14 @@ public class S3SinkTask extends SinkTask {
     }
 
     public boolean shouldFlush() {
+      // by default we skip smart checks and this way fallback to time based flushes
+      // with timeouts configured on Kafka Connect worker level
+      if (flushIntervalMs == -1 && GZIPFileThreshold == -1) {
+        return true;
+      }
+
       long timeSinceFirstRecord = Instant.now().toEpochMilli() - firstTimestamp;
-      boolean doPeriodicFlush = timeSinceFirstRecord >= flushIntervalMs;
+      boolean doPeriodicFlush = flushIntervalMs != -1 && timeSinceFirstRecord >= flushIntervalMs;
       if (doPeriodicFlush) {
         log.debug("{} performing a periodic flush on {}", name(), tp);
         return true;
@@ -279,7 +285,8 @@ public class S3SinkTask extends SinkTask {
           writer.getDataFile().getName(),
           writer.getTotalCompressedSize());
 
-      boolean doFileSizeFlush = writer.getTotalCompressedSize() > GZIPFileThreshold;
+      boolean doFileSizeFlush =
+          GZIPFileThreshold != -1 && writer.getTotalCompressedSize() > GZIPFileThreshold;
       if (doFileSizeFlush) {
         log.debug("{} performing a file size flush on {}", name(), tp);
         return true;
