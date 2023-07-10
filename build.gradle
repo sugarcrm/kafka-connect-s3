@@ -22,7 +22,8 @@ allprojects {
 	dependencies {
 		constraints {
 			api("com.amazonaws:aws-java-sdk-s3:1.12.351")
-			api("org.apache.kafka:connect-api:2.8.0")
+			api("org.apache.kafka:connect-api:3.4.0")
+			api("org.slf4j:slf4j-api:2.0.7")
 
 			testImplementation("junit:junit:4.13.2")
 			testImplementation("com.google.guava:guava:31.1-jre")

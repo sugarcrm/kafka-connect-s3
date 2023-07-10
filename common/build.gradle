@@ -4,6 +4,7 @@ dependencies {
     api project(':api')
 	api("org.apache.kafka:connect-api")
 	api("com.amazonaws:aws-java-sdk-s3")
+	api("org.slf4j:slf4j-api")
 
 	testImplementation("junit:junit")
 	testImplementation("org.mockito:mockito-core:4.9.0")
