@@ -21,8 +21,10 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
@@ -43,11 +45,15 @@ public class S3SinkTask extends SinkTask {
 
   private final Map<TopicPartition, PartitionWriter> partitions = new LinkedHashMap<>();
 
+  private Map<TopicPartition, OffsetAndMetadata> offsetsToCommit = new HashMap<>();
+
   private long GZIPChunkThreshold = 67108864;
 
   private long GZIPFileThreshold = -1;
 
   private long flushIntervalMs = -1;
+
+  private long gracePeriodMs = -1;
 
   private S3Writer s3;
 
@@ -81,6 +87,12 @@ public class S3SinkTask extends SinkTask {
     configGet("flush.interval.ms")
         .map(Long::parseLong)
         .ifPresent(flushIntervalMs -> this.flushIntervalMs = flushIntervalMs);
+
+    configGet("flush.grace.period.ms")
+        .map(Long::parseLong)
+        .ifPresentOrElse(
+            gracePeriodMs -> this.gracePeriodMs = gracePeriodMs,
+            () -> gracePeriodMs = flushIntervalMs > 0 ? flushIntervalMs / 2 : -1);
 
     recordFormat = Configure.createFormat(props);
 
@@ -123,31 +135,19 @@ public class S3SinkTask extends SinkTask {
   @Override
   public Map<TopicPartition, OffsetAndMetadata> preCommit(
       Map<TopicPartition, OffsetAndMetadata> currentOffsets) {
-    Map<TopicPartition, OffsetAndMetadata> result = new HashMap<>();
+
+    // here we flush in the following cases:
+    // * when no thresholds are defined (in this case flush interval is controlled by Kafka Connect
+    // settings)
+    // * when no new records were received for a long period of time
+    partitions.values().stream()
+        .filter(PartitionWriter::shouldFlush)
+        .collect(toList())
+        .forEach(PartitionWriter::done);
 
     log.debug("{} performing preCommit with offsets: {}", name(), currentOffsets);
-
-    currentOffsets.entrySet().stream()
-        .filter(
-            e ->
-                e.getValue() != null
-                    && partitions.get(e.getKey()) != null
-                    && partitions.get(e.getKey()).shouldFlush())
-        .forEach(
-            e -> {
-              BlockGZIPFileWriter blockWriter = partitions.get(e.getKey()).getWriter();
-              log.debug(
-                  "{} preparing offsets for partition: {}, totalCompressedSize: {}",
-                  name(),
-                  e.getKey(),
-                  blockWriter.getTotalCompressedSize());
-              result.put(e.getKey(), e.getValue());
-            });
-
-    if (!result.isEmpty()) {
-      flush(result);
-    }
-
+    Map<TopicPartition, OffsetAndMetadata> result = offsetsToCommit;
+    offsetsToCommit = new HashMap<>();
     return result;
   }
 
@@ -157,8 +157,6 @@ public class S3SinkTask extends SinkTask {
         .collect(groupingBy(record -> new TopicPartition(record.topic(), record.kafkaPartition())))
         .forEach(
             (tp, rs) -> {
-              long firstOffset = rs.get(0).kafkaOffset();
-              long firstTimestamp = rs.get(0).timestamp();
               long lastOffset = rs.get(rs.size() - 1).kafkaOffset();
 
               log.debug(
@@ -168,26 +166,23 @@ public class S3SinkTask extends SinkTask {
                   tp,
                   lastOffset);
 
-              PartitionWriter writer =
-                  partitions.computeIfAbsent(tp, t -> initWriter(t, firstOffset, firstTimestamp));
-              writer.writeAll(rs);
+              for (SinkRecord r : rs) {
+                PartitionWriter writer = partitions.computeIfAbsent(tp, t -> initWriter(t, r));
+
+                // checking if timestamps based flushing should be done
+                if (writer.shouldFlushBefore(r)) {
+                  writer.done();
+                  writer = partitions.computeIfAbsent(tp, t -> initWriter(t, r));
+                }
+
+                writer.writeRecord(r);
+
+                // checking if file size based flushing should be done
+                if (writer.shouldFlushAfter()) {
+                  writer.done();
+                }
+              }
             });
-  }
-
-  @Override
-  public void flush(Map<TopicPartition, OffsetAndMetadata> offsets) throws ConnectException {
-    Metrics.StopTimer timer = metrics.time("flush", tags);
-
-    log.debug("{} flushing offsets: {}", name(), offsets);
-
-    // XXX the docs for flush say that the offsets given are the same as if we tracked the offsets
-    // of the records given to put, so we should just write whatever we have in our files
-    offsets.keySet().stream()
-        .map(partitions::get)
-        .filter(p -> p != null) // TODO error/warn?
-        .forEach(PartitionWriter::done);
-
-    timer.stop();
   }
 
   private String name() {
@@ -211,12 +206,12 @@ public class S3SinkTask extends SinkTask {
     // offsets are managed by Connect
   }
 
-  private PartitionWriter initWriter(TopicPartition tp, long offset, long timestamp) {
+  private PartitionWriter initWriter(TopicPartition tp, SinkRecord firstRecord) {
     try {
-      return new PartitionWriter(tp, offset, timestamp);
+      return new PartitionWriter(tp, firstRecord);
     } catch (IOException e) {
       throw new RetriableException(
-          "Error initializing writer for " + tp + " at offset " + offset, e);
+          "Error initializing writer for " + tp + " at offset " + firstRecord.kafkaOffset(), e);
     }
   }
 
@@ -227,10 +222,13 @@ public class S3SinkTask extends SinkTask {
     private final Map<String, String> tags;
     private boolean finished;
     private boolean closed;
-    private long firstTimestamp;
+    private final SinkRecord firstRecord;
+    private SinkRecord lastRecord;
+    private long lastRecordReceiveTime;
 
-    private PartitionWriter(TopicPartition tp, long firstOffset, long firstTimestamp) throws IOException {
+    private PartitionWriter(TopicPartition tp, SinkRecord firstRecord) throws IOException {
       this.tp = tp;
+      this.firstRecord = firstRecord;
       format = recordFormat.newWriter();
 
       String localBufferDirectory =
@@ -250,77 +248,111 @@ public class S3SinkTask extends SinkTask {
       writer =
           new BlockGZIPFileWriter(
               directory,
-              firstOffset,
+              firstRecord.kafkaOffset(),
               GZIPChunkThreshold,
-              format.init(tp.topic(), tp.partition(), firstOffset));
-      this.firstTimestamp = firstTimestamp;
+              format.init(tp.topic(), tp.partition(), firstRecord.kafkaOffset()));
     }
 
     public BlockGZIPFileWriter getWriter() {
       return writer;
     }
 
+    /**
+     * The method checks whether a periodic flushing should be done.
+     *
+     * <p>If the flushing interval and the file size thresholds are not set it always returns true
+     * letting Kafka Connect to control when to flush.</p>
+     *
+     * <p>Otherwise, if the flushing interval is defined and there were no new records to cause file
+     * size or timestamps based flushing it permits flushing.</p>
+     *
+     * <p>Specifically it permits flushing when the time since the first record produced exceeds
+     * flushIntervalMs + gracePeriodMs (this guarantees any record produced at this point in time
+     * also satisfies timestamps based flushing criteria) and the time since the last record
+     * received exceeds gracePeriodMs (this prioritizes files size and/or timestamps based flushing
+     * when processing lagging messages).</p>
+     *
+     * @return boolean whether to flush the partition writer
+     */
     public boolean shouldFlush() {
-      // by default we skip smart checks and this way fallback to time based flushes
+      // by default, we skip smart checks and this way fallback to time based flushes
       // with timeouts configured on Kafka Connect worker level
       if (flushIntervalMs == -1 && GZIPFileThreshold == -1) {
         return true;
       }
 
-      long timeSinceFirstRecord = Instant.now().toEpochMilli() - firstTimestamp;
-      boolean doPeriodicFlush = flushIntervalMs != -1 && timeSinceFirstRecord >= flushIntervalMs;
-      if (doPeriodicFlush) {
-        log.debug("{} performing a periodic flush on {}", name(), tp);
+      long now = Instant.now().toEpochMilli();
+      long timeSinceFirstRecordProduced = now - firstRecord.timestamp();
+      long timeSinceLastRecordReceived = now - lastRecordReceiveTime;
+
+      boolean doWallClockFlush =
+          flushIntervalMs != -1
+              && timeSinceFirstRecordProduced >= (flushIntervalMs + gracePeriodMs)
+              && timeSinceLastRecordReceived > gracePeriodMs;
+      if (doWallClockFlush) {
+        log.debug("{} performing a wall clock flush on {}", name(), tp);
         return true;
       }
 
-      log.debug(
-          "{} {} total uncompressed size: {}",
-          name(),
-          writer.getDataFile().getName(),
-          writer.getTotalUncompressedSize());
-      log.debug(
-          "{} {} total compressed size: {}",
-          name(),
-          writer.getDataFile().getName(),
-          writer.getTotalCompressedSize());
+      return false;
+    }
 
+    /**
+     * The method checks whether the record r exceeds flushIntervalMs and therefore the partition
+     * writer must be flushed before accepting this record.
+     *
+     * @param r SinkRecord the next record to be written to the partition writer.
+     * @return boolean whether to flush the partition writer
+     */
+    public boolean shouldFlushBefore(SinkRecord r) {
+      long timeSinceFirstRecord = r.timestamp() - firstRecord.timestamp();
+      boolean doPeriodicFlush = flushIntervalMs != -1 && timeSinceFirstRecord >= flushIntervalMs;
+      if (doPeriodicFlush) {
+        log.debug("{} performing a timestamp flush on {}", name(), tp);
+        return true;
+      }
+
+      return false;
+    }
+
+    /**
+     * The method checks whether the lastly written record caused the file size to exceed
+     * GZIPFileThreshold. If it exceeded then the partition writer must be flushed before accepting
+     * any new records.
+     *
+     * @return boolean whether to flush the partition writer
+     */
+    public boolean shouldFlushAfter() {
       boolean doFileSizeFlush =
           GZIPFileThreshold != -1 && writer.getTotalCompressedSize() > GZIPFileThreshold;
       if (doFileSizeFlush) {
         log.debug("{} performing a file size flush on {}", name(), tp);
         return true;
       }
+
       return false;
     }
 
-    private void writeAll(Collection<SinkRecord> records) {
-      metrics.hist(records.size(), "putSize", tags);
-      try (Metrics.StopTimer ignored = metrics.time("writeAll", tags)) {
-        writer.write(
-            format
-                .writeBatch(
-                    records.stream()
-                        .map(
-                            record ->
-                                new ProducerRecord<>(
-                                    record.topic(),
-                                    record.kafkaPartition(),
-                                    keyConverter
-                                        .map(
-                                            c ->
-                                                c.fromConnectData(
-                                                    record.topic(),
-                                                    record.keySchema(),
-                                                    record.key()))
-                                        .orElse(null),
-                                    valueConverter.fromConnectData(
-                                        record.topic(), record.valueSchema(), record.value()))))
-                .collect(toList()),
-            records.size());
+    private void writeRecord(SinkRecord r) {
+      try (Metrics.StopTimer ignored = metrics.time("writeRecord", tags)) {
+        ProducerRecord<byte[], byte[]> pr =
+            new ProducerRecord<>(
+                r.topic(),
+                r.kafkaPartition(),
+                keyConverter
+                    .map(c -> c.fromConnectData(r.topic(), r.keySchema(), r.key()))
+                    .orElse(null),
+                valueConverter.fromConnectData(r.topic(), r.valueSchema(), r.value()));
+
+        List<byte[]> formatted = format.writeBatch(Stream.of(pr)).collect(toList());
+
+        writer.write(formatted, 1);
       } catch (IOException e) {
         throw new RetriableException("Failed to write to buffer", e);
       }
+
+      lastRecord = r;
+      lastRecordReceiveTime = Instant.now().toEpochMilli();
     }
 
     public File getDataFile() {
@@ -348,6 +380,14 @@ public class S3SinkTask extends SinkTask {
       } catch (IOException e) {
         throw new RetriableException("Error flushing " + tp, e);
       }
+
+      // here + 1 is required as the committed offset must point the first unprocessed message
+      offsetsToCommit.put(tp, new OffsetAndMetadata(lastRecord.kafkaOffset() + 1));
+      log.debug(
+          "{} updating safe to commit offsets with pair {}:{}",
+          name(),
+          tp,
+          offsetsToCommit.get(tp));
 
       delete();
       time.stop();
