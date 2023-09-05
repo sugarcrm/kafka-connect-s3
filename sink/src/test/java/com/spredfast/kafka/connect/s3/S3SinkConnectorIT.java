@@ -136,10 +136,14 @@ public class S3SinkConnectorIT {
 
     // Produce messages to the topic (uncompressed: 3190, compressed: ~340)
     StringBuilder sb = new StringBuilder();
-    for (int i = 0; i < 100; i++) {
+    for (int i = 0; i < 95; i++) {
       String json = String.format("{{\"foo\": \"bar\", \"counter\": %d}}", i);
       kafkaCluster.send(SendValues.to(topicName, json));
       sb.append(json).append("\n");
+    }
+    for (int i = 95; i < 100; i++) {
+      String json = String.format("{{\"foo\": \"bar\", \"counter\": %d}}", i);
+      kafkaCluster.send(SendValues.to(topicName, json));
     }
     String expectedDataObjectContents = sb.toString();
     LocalDate today = LocalDate.now(ZoneOffset.UTC);
@@ -168,7 +172,7 @@ public class S3SinkConnectorIT {
     String expectedIndexObjectContents =
         "{\"chunks\":["
             + "{\"byte_length_uncompressed\":2998,\"num_records\":94,\"byte_length\":270,\"byte_offset\":0,\"first_record_offset\":0},"
-            + "{\"byte_length_uncompressed\":192,\"num_records\":6,\"byte_length\":69,\"byte_offset\":270,\"first_record_offset\":94}]}\n";
+            + "{\"byte_length_uncompressed\":32,\"num_records\":1,\"byte_length\":51,\"byte_offset\":270,\"first_record_offset\":94}]}\n";
     objectContents = getS3FileOutput(bucketName, indexObjectKey);
     assertEquals(expectedIndexObjectContents, objectContents);
 
@@ -180,7 +184,7 @@ public class S3SinkConnectorIT {
 
     // The new index object won't be written as gzip file is not big enough
     String indexObjectKey2 =
-        String.format("%s/%s/%s-00000-000000000100.index.json", prefix, today, topicName);
+        String.format("%s/%s/%s-00000-000000000095.index.json", prefix, today, topicName);
     Awaitility.await()
         .pollDelay(5, TimeUnit.SECONDS)
         .during(20, TimeUnit.SECONDS)
