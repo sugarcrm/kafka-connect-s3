@@ -1,6 +1,5 @@
 package com.spredfast.kafka.connect.s3;
 
-import static java.util.stream.Collectors.toList;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -42,7 +41,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Supplier;
-import java.util.stream.Stream;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.Test;
@@ -503,10 +501,7 @@ public class S3FilesReaderTest {
   private void write(BlockGZIPFileWriter writer, byte[] key, byte[] value, boolean includeKeys)
       throws IOException {
     writer.write(
-        new ByteLengthFormat(includeKeys)
-            .newWriter()
-            .writeBatch(Stream.of(new ProducerRecord<>("", key, value)))
-            .collect(toList()),
+        new ByteLengthFormat(includeKeys).newWriter().write(new ProducerRecord<>("", key, value)),
         1);
   }
 

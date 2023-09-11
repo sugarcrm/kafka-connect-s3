@@ -7,7 +7,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.stream.Stream;
 import javax.xml.bind.DatatypeConverter;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.Test;
@@ -45,14 +44,11 @@ public class TrailingDelimiterFormatTest {
         "abc\tdef\n".getBytes(Charsets.UTF_16BE),
         format
             .newWriter()
-            .writeBatch(
-                Stream.of(
-                    new ProducerRecord<>(
-                        "topic",
-                        "abc".getBytes(Charsets.UTF_16BE),
-                        "def".getBytes(Charsets.UTF_16BE))))
-            .findFirst()
-            .get());
+            .write(
+                new ProducerRecord<>(
+                    "topic",
+                    "abc".getBytes(Charsets.UTF_16BE),
+                    "def".getBytes(Charsets.UTF_16BE))));
   }
 
   private void assertBytesAreEqual(byte[] expected, byte[] actual) {

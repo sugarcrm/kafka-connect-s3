@@ -1,7 +1,6 @@
 package com.spredfast.kafka.connect.s3;
 
 import java.util.function.Function;
-import java.util.stream.Stream;
 import org.apache.kafka.clients.producer.ProducerRecord;
 
 /** */
@@ -12,8 +11,7 @@ public interface S3RecordsWriter {
     return new byte[0];
   }
 
-  /** Called multiple times to encode a set of records. Should return one byte array per record. */
-  Stream<byte[]> writeBatch(Stream<ProducerRecord<byte[], byte[]>> records);
+  byte[] write(ProducerRecord<byte[], byte[]> record);
 
   /** Hook for writing any trailer bytes to the S3 file. */
   default byte[] finish(String topic, int partition) {
@@ -22,6 +20,6 @@ public interface S3RecordsWriter {
 
   static S3RecordsWriter forRecordWriter(
       Function<ProducerRecord<byte[], byte[]>, byte[]> writeRecord) {
-    return records -> records.map(writeRecord);
+    return (S3RecordsWriter) writeRecord;
   }
 }

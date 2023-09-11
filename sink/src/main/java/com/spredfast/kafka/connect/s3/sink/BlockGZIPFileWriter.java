@@ -13,7 +13,6 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.zip.GZIPOutputStream;
 
 /**
@@ -163,18 +162,12 @@ public class BlockGZIPFileWriter implements Closeable {
   }
 
   /**
-   * @param toWrite the bytes to write.
-   * @param recordCount how many records these bytes represent.
+   * @param bytes the bytes to write.
    */
-  public void write(List<byte[]> toWrite, long recordCount) throws IOException {
+  public void write(byte[] bytes, int recordCount) throws IOException {
     Chunk ch = currentChunk();
 
-    int rawBytesToWrite = 0;
-    for (byte[] bytes : toWrite) {
-      rawBytesToWrite += bytes.length;
-    }
-
-    if ((ch.rawBytes + rawBytesToWrite) > chunkThreshold) {
+    if ((ch.rawBytes + bytes.length) > chunkThreshold) {
       finishChunk();
       initChunkWriter();
 
@@ -185,11 +178,9 @@ public class BlockGZIPFileWriter implements Closeable {
       ch = newCh;
     }
 
-    for (byte[] bytes : toWrite) {
-      gzipStream.write(bytes);
-    }
+    gzipStream.write(bytes);
 
-    ch.rawBytes += rawBytesToWrite;
+    ch.rawBytes += bytes.length;
     ch.numRecords += recordCount;
   }
 

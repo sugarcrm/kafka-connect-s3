@@ -17,14 +17,11 @@ import com.spredfast.kafka.connect.s3.S3RecordsWriter;
 import java.io.File;
 import java.io.IOException;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Stream;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
@@ -261,16 +258,16 @@ public class S3SinkTask extends SinkTask {
      * The method checks whether a periodic flushing should be done.
      *
      * <p>If the flushing interval and the file size thresholds are not set it always returns true
-     * letting Kafka Connect to control when to flush.</p>
+     * letting Kafka Connect to control when to flush.
      *
      * <p>Otherwise, if the flushing interval is defined and there were no new records to cause file
-     * size or timestamps based flushing it permits flushing.</p>
+     * size or timestamps based flushing it permits flushing.
      *
      * <p>Specifically it permits flushing when the time since the first record produced exceeds
      * flushIntervalMs + gracePeriodMs (this guarantees any record produced at this point in time
      * also satisfies timestamps based flushing criteria) and the time since the last record
      * received exceeds gracePeriodMs (this prioritizes files size and/or timestamps based flushing
-     * when processing lagging messages).</p>
+     * when processing lagging messages).
      *
      * @return boolean whether to flush the partition writer
      */
@@ -344,7 +341,7 @@ public class S3SinkTask extends SinkTask {
                     .orElse(null),
                 valueConverter.fromConnectData(r.topic(), r.valueSchema(), r.value()));
 
-        List<byte[]> formatted = format.writeBatch(Stream.of(pr)).collect(toList());
+        byte[] formatted = format.write(pr);
 
         writer.write(formatted, 1);
       } catch (IOException e) {
@@ -368,7 +365,7 @@ public class S3SinkTask extends SinkTask {
       Metrics.StopTimer time = metrics.time("s3Put", tags);
       try {
         if (!finished) {
-          writer.write(Arrays.asList(format.finish(tp.topic(), tp.partition())), 0);
+          writer.write(format.finish(tp.topic(), tp.partition()), 0);
           finished = true;
         }
         if (!closed) {

@@ -34,7 +34,7 @@ public class ByteLengthFormat implements S3RecordFormat, Configurable {
 
   @Override
   public S3RecordsWriter newWriter() {
-    return records -> records.map(this::encode);
+    return this::encode;
   }
 
   private byte[] encode(ProducerRecord<byte[], byte[]> r) {
