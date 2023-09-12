@@ -69,7 +69,7 @@ public class TrailingDelimiterFormat implements S3RecordFormat, Configurable {
 
   @Override
   public S3RecordsWriter newWriter() {
-    return records -> records.map(this::encode);
+    return this::encode;
   }
 
   @Override

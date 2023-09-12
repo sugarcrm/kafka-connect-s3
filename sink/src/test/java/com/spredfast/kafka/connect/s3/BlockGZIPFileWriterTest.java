@@ -15,8 +15,6 @@ import java.io.FileInputStream;
 import java.io.FileReader;
 import java.io.InputStreamReader;
 import java.io.RandomAccessFile;
-import java.util.Arrays;
-import java.util.List;
 import java.util.zip.GZIPInputStream;
 import org.junit.Before;
 import org.junit.Test;
@@ -73,8 +71,8 @@ public class BlockGZIPFileWriterTest {
     verifyIndexFile(w, 987654321, expectedLines);
   }
 
-  static List<byte[]> toRecord(String line) {
-    return Arrays.asList((line + '\n').getBytes());
+  static byte[] toRecord(String line) {
+    return (line + '\n').getBytes();
   }
 
   private void verifyOutputIsSaneGZIPFile(File file, String[] expectedRecords) throws Exception {

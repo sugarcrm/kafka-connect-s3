@@ -59,7 +59,7 @@ public class FormatTests {
     ByteArrayOutputStream boas = new ByteArrayOutputStream();
     boas.write(writer.init("topic", 0, startOffset));
 
-    writer.writeBatch(records).forEach(b -> boas.write(b, 0, b.length));
+    records.map(writer::write).forEach(b -> boas.write(b, 0, b.length));
     boas.write(writer.finish("topic", 0));
 
     ByteArrayInputStream in = new ByteArrayInputStream(boas.toByteArray());
