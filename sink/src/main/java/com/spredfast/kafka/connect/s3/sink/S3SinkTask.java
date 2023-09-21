@@ -282,12 +282,12 @@ public class S3SinkTask extends SinkTask {
       long timeSinceFirstRecordProduced = now - firstRecord.timestamp();
       long timeSinceLastRecordReceived = now - lastRecordReceiveTime;
 
-      boolean doWallClockFlush =
+      boolean doWallTimeFlush =
           flushIntervalMs != -1
               && timeSinceFirstRecordProduced >= (flushIntervalMs + gracePeriodMs)
               && timeSinceLastRecordReceived > gracePeriodMs;
-      if (doWallClockFlush) {
-        log.debug("{} performing a wall clock flush on {}", name(), tp);
+      if (doWallTimeFlush) {
+        log.debug("{} performing a wall time flush on {}", name(), tp);
         return true;
       }
 
