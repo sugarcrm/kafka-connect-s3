@@ -142,7 +142,7 @@ public class S3SinkTask extends SinkTask {
         .collect(toList())
         .forEach(PartitionWriter::done);
 
-    log.debug("{} performing preCommit with offsets: {}", name(), currentOffsets);
+    log.debug("{} performing preCommit with offsets: {}", name(), offsetsToCommit);
     Map<TopicPartition, OffsetAndMetadata> result = offsetsToCommit;
     offsetsToCommit = new HashMap<>();
     return result;
@@ -156,7 +156,7 @@ public class S3SinkTask extends SinkTask {
             (tp, rs) -> {
               long lastOffset = rs.get(rs.size() - 1).kafkaOffset();
 
-              log.debug(
+              log.trace(
                   "{} received {} records for {} to archive. Last offset {}",
                   name(),
                   rs.size(),
