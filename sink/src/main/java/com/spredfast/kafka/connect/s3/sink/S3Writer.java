@@ -21,6 +21,8 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.util.TimeZone;
 import org.apache.kafka.common.TopicPartition;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * S3Writer provides necessary operations over S3 to store files and retrieve Last commit offsets
@@ -30,6 +32,7 @@ import org.apache.kafka.common.TopicPartition;
  * for now it's just to keep things simpler to test.
  */
 public class S3Writer {
+  private static final Logger log = LoggerFactory.getLogger(S3SinkTask.class);
   private static final TimeZone UTC = TimeZone.getTimeZone("UTC");
   private final ObjectReader reader = new ObjectMapper().readerFor(ChunksIndex.class);
   private String keyPrefix;
@@ -77,8 +80,10 @@ public class S3Writer {
     try {
       Upload upload = tm.upload(this.bucket, dataObjectKey, dataFile);
       upload.waitForCompletion();
+      log.debug("uploaded {} object to s3", dataObjectKey);
       upload = tm.upload(this.bucket, indexObjectKey, indexFile);
       upload.waitForCompletion();
+      log.debug("uploaded {} object to s3", indexObjectKey);
     } catch (Exception e) {
       throw new IOException("Failed to upload to S3", e);
     }
