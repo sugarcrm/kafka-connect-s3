@@ -116,5 +116,13 @@ publishing {
 
 			url = "https://nexus.service.sugarcrm.com/repository/cxp-public/"
 		}
+		maven {
+			name = 'GitHubPackages'
+			credentials {
+				username = System.getenv("USERNAME")
+				password = System.getenv("TOKEN")
+			}
+			url = "https://maven.pkg.github.com/sugarcrm/kafka-connect-s3"
+		}
 	}
 }
