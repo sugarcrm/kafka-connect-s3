@@ -185,39 +185,14 @@ Pull requests welcome! If you need ideas, check the issues for [open enhancement
 ## Publishing
 
 ```sh
-groupId=io.sugarcrm
-artifactId=kafka-connect-s3
-version=1.0.9-all
-repositoryId=cxp-nexus
-mvn -s ~/.m2/settings.xml deploy:deploy-file -DgroupId=${groupId} \
-    -DartifactId=${artifactId} \
-    -Dversion=${version} \
-    -Dpackaging=jar \
-    -Dfile=kafka-connect-s3-${version}.jar \
-    -DgeneratePom=true \
-    -DrepositoryId=${repositoryId} \
-    -Durl=https://nexus.service.sugarcrm.com/repository/cxp-public/
-```
-### Settings
+# publish to nexus
+export MAVEN_USERNAME=...
+export MAVEN_PASSWORD=...
+./gradlew publishShadowPublicationToMavenRepository
 
-```sh
-cat ~/.m2/settings.xml
-<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
-    <localRepository/>
-    <interactiveMode/>
-    <offline/>
-    <pluginGroups/>
-    <servers>
-        <server>
-            <id>cxp-nexus</id>
-            <username>USERNAME</username>
-            <password>PASSWORD</password>
-        </server>
-    </servers>
-    <mirrors/>
-    <proxies/>
-    <profiles/>
-    <activeProfiles/>
-</settings>
+# publish to github
+export USERNAME=ramanenka
+export TOKEN=... # a personal github token that allows to write:packages
+./gradlew publishShadowPublicationToGitHubPackagesRepository
 ```
+
