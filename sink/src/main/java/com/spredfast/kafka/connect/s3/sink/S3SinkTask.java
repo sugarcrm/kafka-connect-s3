@@ -233,7 +233,11 @@ public class S3SinkTask extends SinkTask {
               .orElseThrow(() -> new ConnectException("No local buffer directory configured"));
 
       File directory = new File(localBufferDirectory);
-      if (!directory.exists() && !directory.mkdirs()) {
+      int attempts = 3;
+      while (attempts > 0 && !directory.exists() && !directory.mkdirs()) {
+        attempts--;
+      }
+      if (!directory.exists()) {
         throw new ConnectException("Could not create directory " + localBufferDirectory);
       }
 
