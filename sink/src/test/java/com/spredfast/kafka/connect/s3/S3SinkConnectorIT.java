@@ -4,14 +4,6 @@ import static net.mguenther.kafka.junit.ObserveKeyValues.on;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-import com.amazonaws.SdkClientException;
-import com.amazonaws.auth.AWSStaticCredentialsProvider;
-import com.amazonaws.auth.BasicAWSCredentials;
-import com.amazonaws.client.builder.AwsClientBuilder;
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3ClientBuilder;
-import com.amazonaws.services.s3.model.DeleteObjectsRequest;
-import com.amazonaws.services.s3.model.S3Object;
 import io.debezium.testing.testcontainers.Connector.State;
 import io.debezium.testing.testcontainers.ConnectorConfiguration;
 import io.debezium.testing.testcontainers.DebeziumContainer;
@@ -61,6 +53,12 @@ import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.lifecycle.Startables;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
+import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
 
 public class S3SinkConnectorIT {
 
@@ -68,7 +66,7 @@ public class S3SinkConnectorIT {
 
   private static final Network network = Network.newNetwork();
 
-  private AmazonS3 s3;
+  private S3Client s3;
 
   private static final KafkaContainer kafkaContainer =
       new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.3.2")).withNetwork(network);
@@ -110,14 +108,12 @@ public class S3SinkConnectorIT {
   @Before
   public void setup() {
     s3 =
-        AmazonS3ClientBuilder.standard()
-            .withEndpointConfiguration(
-                new AwsClientBuilder.EndpointConfiguration(
-                    localStackContainer.getEndpointOverride(Service.S3).toString(),
-                    localStackContainer.getRegion()))
-            .withCredentials(
-                new AWSStaticCredentialsProvider(
-                    new BasicAWSCredentials(
+        S3Client.builder()
+            .region(Region.of(localStackContainer.getRegion()))
+            .endpointOverride(localStackContainer.getEndpointOverride(Service.S3))
+            .credentialsProvider(
+                StaticCredentialsProvider.create(
+                    AwsBasicCredentials.create(
                         localStackContainer.getAccessKey(), localStackContainer.getSecretKey())))
             .build();
 
@@ -154,7 +150,7 @@ public class S3SinkConnectorIT {
     String prefix = "systest";
     String topicName = "system_test_size";
     String connectorName = "s3-sink-size";
-    s3.createBucket(bucketName);
+    s3.createBucket(b -> b.bucket(bucketName));
 
     // Create the test topic
     kafkaCluster.createTopic(TopicConfig.withName(topicName).withNumberOfPartitions(1));
@@ -242,7 +238,7 @@ public class S3SinkConnectorIT {
     String prefix = "systest";
     String topicName = "system_test_12h";
     String connectorName = "s3-sink-12h";
-    s3.createBucket(bucketName);
+    s3.createBucket(b -> b.bucket(bucketName));
 
     // Create the test topic
     kafkaCluster.createTopic(TopicConfig.withName(topicName).withNumberOfPartitions(1));
@@ -321,7 +317,7 @@ public class S3SinkConnectorIT {
     String prefix = "systest";
     String topicName = "system_test";
     String connectorName = "s3-sink";
-    s3.createBucket(bucketName);
+    s3.createBucket(b -> b.bucket(bucketName));
 
     // Create the test topic
     kafkaCluster.createTopic(TopicConfig.withName(topicName).withNumberOfPartitions(1));
@@ -481,7 +477,7 @@ public class S3SinkConnectorIT {
     String prefix = "systest";
     String topicName = "system_test_wall_time";
     String connectorName = "s3-sink-wall-time";
-    s3.createBucket(bucketName);
+    s3.createBucket(b -> b.bucket(bucketName));
 
     // Create the test topic
     kafkaCluster.createTopic(TopicConfig.withName(topicName).withNumberOfPartitions(1));
@@ -563,16 +559,19 @@ public class S3SinkConnectorIT {
       kafkaCluster.send(SendValues.to(topicName, json));
     }
 
-    s3.deleteObjects(
-        new DeleteObjectsRequest(bucketName)
-            .withKeys(
+    List<ObjectIdentifier> keysToDelete =
+        Stream.of(
                 lastChunkIndexObjectKey,
                 dataObjectKey,
                 indexObjectKey,
                 dataObjectKey2,
-                indexObjectKey2));
-    s3.deleteBucket(bucketName);
-    s3.createBucket(bucketName);
+                indexObjectKey2)
+            .map(key -> ObjectIdentifier.builder().key(key).build())
+            .collect(Collectors.toList());
+
+    s3.deleteObjects(b -> b.bucket(bucketName).delete(d -> d.objects(keysToDelete)));
+    s3.deleteBucket(b -> b.bucket(bucketName));
+    s3.createBucket(b -> b.bucket(bucketName));
 
     assertTrue(expectedObjects.stream().noneMatch(key -> objectKeyExists(bucketName, key)));
     assertTrue(expectedObjects2.stream().noneMatch(key -> objectKeyExists(bucketName, key)));
@@ -618,7 +617,7 @@ public class S3SinkConnectorIT {
     String prefix = "binsystest";
     String sinkTopicName = "binary-system_test";
     String sinkConnectorName = "s3-sink";
-    s3.createBucket(bucketName);
+    s3.createBucket(b -> b.bucket(bucketName));
 
     // Create the test topic
     kafkaCluster.createTopic(TopicConfig.withName(sinkTopicName).withNumberOfPartitions(1));
@@ -745,15 +744,12 @@ public class S3SinkConnectorIT {
   }
 
   private boolean objectKeyExists(String bucketName, String objectKey) {
-    boolean returnValue;
-
     try {
-      returnValue = s3.doesObjectExist(bucketName, objectKey);
-    } catch (SdkClientException e) {
-      returnValue = false;
+      s3.headObject(b -> b.bucket(bucketName).key(objectKey));
+      return true;
+    } catch (NoSuchKeyException e) {
+      return false;
     }
-
-    return returnValue;
   }
 
   private long getConsumerOffset(String groupId, String topic, int partition)
@@ -769,13 +765,10 @@ public class S3SinkConnectorIT {
 
   private String getS3FileOutput(String bucketName, String objectKey) throws IOException {
     StringBuilder sb = new StringBuilder();
-    S3Object s3Object = s3.getObject(bucketName, objectKey);
 
-    InputStream inputStream;
+    InputStream inputStream = s3.getObject(b -> b.bucket(bucketName).key(objectKey));
     if (objectKey.endsWith(".gz")) {
-      inputStream = new GzipCompressorInputStream(s3Object.getObjectContent(), true);
-    } else {
-      inputStream = s3Object.getObjectContent();
+      inputStream = new GzipCompressorInputStream(inputStream, true);
     }
 
     String line;

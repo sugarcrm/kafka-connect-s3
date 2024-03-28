@@ -2,13 +2,6 @@ package com.spredfast.kafka.connect.s3.source;
 
 import static java.util.stream.Collectors.toList;
 
-import com.amazonaws.AmazonClientException;
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.model.GetObjectRequest;
-import com.amazonaws.services.s3.model.ListObjectsRequest;
-import com.amazonaws.services.s3.model.ObjectListing;
-import com.amazonaws.services.s3.model.S3Object;
-import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
 import com.spredfast.kafka.connect.s3.BlockMetadata;
@@ -19,7 +12,6 @@ import com.spredfast.kafka.connect.s3.json.ChunkDescriptor;
 import com.spredfast.kafka.connect.s3.json.ChunksIndex;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -35,15 +27,21 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.core.exception.RetryableException;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
+import software.amazon.awssdk.services.s3.model.S3Object;
 
 /**
  * Helpers for reading records out of S3. Not thread safe. Records should be in order since S3 lists
  * files in lexicographic order. It is strongly recommended that you use a unique key prefix per
  * topic as there is no option to restrict this reader by topic.
  *
- * <p>NOTE: hasNext() on the returned iterators may throw AmazonClientException if there was a
- * problem communicating with S3 or reading an object. Your code should catch AmazonClientException
- * and implement back-off and retry as desired.
+ * <p>NOTE: hasNext() on the returned iterators may throw S3Exception if there was a problem
+ * communicating with S3 or reading an object. Your code should catch S3Exception and implement
+ * back-off and retry as desired.
  *
  * <p>Any other exception should be considered a permanent failure.
  */
@@ -51,7 +49,7 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 
   private static final Logger log = LoggerFactory.getLogger(S3FilesReader.class);
 
-  private final AmazonS3 s3Client;
+  private final S3Client s3Client;
 
   private final Supplier<S3RecordsReader> makeReader;
 
@@ -65,7 +63,7 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 
   public S3FilesReader(
       S3SourceConfig config,
-      AmazonS3 s3Client,
+      S3Client s3Client,
       Map<S3Partition, S3Offset> offsets,
       Layout.Parser layoutParser,
       Supplier<S3RecordsReader> recordReader) {
@@ -112,8 +110,8 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
         new Iterator<S3SourceRecord>() {
           String currentKey;
 
-          ObjectListing objectListing;
-          Iterator<S3ObjectSummary> nextFile = Collections.emptyIterator();
+          ListObjectsV2Response objectListing;
+          Iterator<S3Object> nextFile = Collections.emptyIterator();
           Iterator<ConsumerRecord<byte[], byte[]>> iterator = Collections.emptyIterator();
 
           private void nextObject() {
@@ -126,15 +124,15 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
               // to mitigate that, have as many tasks as partitions.
               if (objectListing == null) {
                 objectListing =
-                    s3Client.listObjects(
-                        new ListObjectsRequest(
-                            config.bucket,
-                            config.keyPrefix,
-                            config.startMarker,
-                            null,
-                            // we have to filter out chunk indexes on this end, so
-                            // whatever the requested page size is, we'll need twice that
-                            config.pageSize * 2));
+                    s3Client.listObjectsV2(
+                        b ->
+                            b.bucket(config.bucket)
+                                .prefix(config.keyPrefix)
+                                .startAfter(config.startMarker)
+                                .delimiter(null)
+                                // we have to filter out chunk indexes on this end, so
+                                // whatever the requested page size is, we'll need twice that
+                                .maxKeys(config.pageSize * 2));
                 log.debug(
                     "aws ls {}/{} after:{} = {}",
                     config.bucket,
@@ -142,12 +140,22 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
                     config.startMarker,
                     LazyString.of(
                         () ->
-                            objectListing.getObjectSummaries().stream()
-                                .map(S3ObjectSummary::getKey)
+                            objectListing.contents().stream()
+                                .map(S3Object::key)
                                 .collect(toList())));
               } else {
-                String marker = objectListing.getNextMarker();
-                objectListing = s3Client.listNextBatchOfObjects(objectListing);
+                String marker = objectListing.nextContinuationToken();
+                objectListing =
+                    s3Client.listObjectsV2(
+                        b ->
+                            b.bucket(config.bucket)
+                                .prefix(config.keyPrefix)
+                                .startAfter(config.startMarker)
+                                .delimiter(null)
+                                // we have to filter out chunk indexes on this end, so
+                                // whatever the requested page size is, we'll need twice that
+                                .maxKeys(config.pageSize * 2)
+                                .continuationToken(objectListing.nextContinuationToken()));
                 log.debug(
                     "aws ls {}/{} after:{} = {}",
                     config.bucket,
@@ -155,24 +163,22 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
                     marker,
                     LazyString.of(
                         () ->
-                            objectListing.getObjectSummaries().stream()
-                                .map(S3ObjectSummary::getKey)
+                            objectListing.contents().stream()
+                                .map(S3Object::key)
                                 .collect(toList())));
               }
 
-              List<S3ObjectSummary> chunks =
-                  new ArrayList<>(objectListing.getObjectSummaries().size() / 2);
-              for (S3ObjectSummary chunk : objectListing.getObjectSummaries()) {
-                if (DATA_SUFFIX.matcher(chunk.getKey()).find()
+              List<S3Object> chunks = new ArrayList<>(objectListing.contents().size() / 2);
+              for (S3Object chunk : objectListing.contents()) {
+                if (DATA_SUFFIX.matcher(chunk.key()).find()
                     && parseKeyUnchecked(
-                        chunk.getKey(), (t, p, o) -> config.partitionFilter.matches(t, p))) {
+                        chunk.key(), (t, p, o) -> config.partitionFilter.matches(t, p))) {
                   S3Offset offset = offset(chunk);
                   if (offset != null) {
                     // if our offset for this partition is beyond this chunk, ignore it
                     // this relies on filename lexicographic order being correct
-                    if (offset.getS3key().compareTo(chunk.getKey()) > 0) {
-                      log.debug(
-                          "Skipping {} because < current offset of {}", chunk.getKey(), offset);
+                    if (offset.getS3key().compareTo(chunk.key()) > 0) {
+                      log.debug("Skipping {} because < current offset of {}", chunk.key(), offset);
                       continue;
                     }
                   }
@@ -181,8 +187,7 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
               }
               log.debug(
                   "Next Chunks: {}",
-                  LazyString.of(
-                      () -> chunks.stream().map(S3ObjectSummary::getKey).collect(toList())));
+                  LazyString.of(() -> chunks.stream().map(S3Object::key).collect(toList())));
               nextFile = chunks.iterator();
             }
             if (!nextFile.hasNext()) {
@@ -190,16 +195,17 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
               return;
             }
             try {
-              S3ObjectSummary file = nextFile.next();
+              S3Object file = nextFile.next();
 
-              currentKey = file.getKey();
+              currentKey = file.key();
               S3Offset offset = offset(file);
               if (offset != null && offset.getS3key().equals(currentKey)) {
                 resumeFromOffset(offset);
               } else {
                 log.debug("Now reading from {}", currentKey);
                 S3RecordsReader reader = makeReader.get();
-                InputStream content = getContent(s3Client.getObject(config.bucket, currentKey));
+                InputStream content =
+                    getContent(s3Client.getObject(b -> b.bucket(config.bucket).key(currentKey)));
                 iterator =
                     parseKey(
                         currentKey,
@@ -209,17 +215,18 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
                         });
               }
             } catch (IOException e) {
-              throw new AmazonClientException(e);
+              throw RetryableException.create("Communication failure", e);
             }
           }
 
-          private InputStream getContent(S3Object object) throws IOException {
-            return config.inputFilter.filter(object.getObjectContent());
+          private InputStream getContent(ResponseInputStream<GetObjectResponse> object)
+              throws IOException {
+            return config.inputFilter.filter(object);
           }
 
-          private S3Offset offset(S3ObjectSummary chunk) {
+          private S3Offset offset(S3Object chunk) {
             final TopicPartition topicPartition =
-                layoutParser.parseBlockPath(chunk.getKey()).getTopicPartition();
+                layoutParser.parseBlockPath(chunk.key()).getTopicPartition();
             final S3Partition s3Partition =
                 S3Partition.from(
                     config.bucket,
@@ -259,10 +266,10 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 
             // if need the start of the file for the read, let it read it
             if (reader.isInitRequired() && chunkDescriptor.byte_offset > 0) {
-              try (S3Object object =
-                  s3Client.getObject(new GetObjectRequest(config.bucket, offset.getS3key()))) {
+              try (ResponseInputStream<GetObjectResponse> object =
+                  s3Client.getObject(b -> b.bucket(config.bucket).key(offset.getS3key()))) {
                 parseKey(
-                    object.getKey(),
+                    offset.getS3key(),
                     (topic, partition, startOffset) -> {
                       reader.init(topic, partition, getContent(object), startOffset);
                       return null;
@@ -270,12 +277,15 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
               }
             }
 
-            GetObjectRequest request = new GetObjectRequest(config.bucket, offset.getS3key());
-            request.setRange(chunkDescriptor.byte_offset, index.totalSize());
+            ResponseInputStream<GetObjectResponse> object =
+                s3Client.getObject(
+                    b ->
+                        b.bucket(config.bucket)
+                            .key(offset.getS3key())
+                            .range(
+                                "bytes=" + chunkDescriptor.byte_offset + "-" + index.totalSize()));
 
-            S3Object object = s3Client.getObject(request);
-
-            currentKey = object.getKey();
+            currentKey = offset.getS3key();
             log.debug(
                 "Resume {}: Now reading from {}, reading {}-{}",
                 offset,
@@ -285,7 +295,7 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
 
             iterator =
                 parseKey(
-                    object.getKey(),
+                    offset.getS3key(),
                     (topic, partition, startOffset) ->
                         reader.readAll(
                             topic,
@@ -401,11 +411,13 @@ public class S3FilesReader implements Iterable<S3SourceRecord> {
   }
 
   private ChunksIndex getChunksIndex(String key) throws IOException {
-    return indexParser.readValue(
-        new InputStreamReader(
-            s3Client
-                .getObject(config.bucket, DATA_SUFFIX.matcher(key).replaceAll(".index.json"))
-                .getObjectContent()));
+    ResponseInputStream<GetObjectResponse> in =
+        s3Client.getObject(
+            b -> b.bucket(config.bucket).key(DATA_SUFFIX.matcher(key).replaceAll(".index.json")));
+
+    try (in) {
+      return indexParser.readValue(in);
+    }
   }
 
   /**

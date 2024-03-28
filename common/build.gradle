@@ -3,8 +3,9 @@ description = ""
 dependencies {
     api project(':api')
 	api("org.apache.kafka:connect-api")
-	api("com.amazonaws:aws-java-sdk-s3")
+	api("software.amazon.awssdk:s3")
 	api("org.slf4j:slf4j-api")
+	api("com.fasterxml.jackson.core:jackson-databind")
 
 	testImplementation("junit:junit")
 	testImplementation("org.mockito:mockito-core:4.9.0")

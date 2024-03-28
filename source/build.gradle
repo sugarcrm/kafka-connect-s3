@@ -24,8 +24,9 @@ tasks.test.dependsOn(":sink:copyLibs")
 
 dependencies {
 	implementation project(':common')
-
 	testImplementation project(':sink')
 	testImplementation("junit:junit")
-	testImplementation("org.mockito:mockito-core:2.23.4")
+	testImplementation("org.mockito:mockito-core")
+	testImplementation("ch.qos.logback:logback-core:1.4.5")
+	testImplementation("ch.qos.logback:logback-classic:1.4.5")
 }

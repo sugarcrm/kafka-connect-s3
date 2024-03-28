@@ -1,28 +1,22 @@
 package com.spredfast.kafka.connect.s3.sink;
 
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.model.AmazonS3Exception;
-import com.amazonaws.services.s3.model.ObjectMetadata;
-import com.amazonaws.services.s3.model.PutObjectRequest;
-import com.amazonaws.services.s3.model.S3Object;
-import com.amazonaws.services.s3.transfer.TransferManager;
-import com.amazonaws.services.s3.transfer.TransferManagerBuilder;
-import com.amazonaws.services.s3.transfer.Upload;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
 import com.spredfast.kafka.connect.s3.BlockMetadata;
 import com.spredfast.kafka.connect.s3.Layout;
 import com.spredfast.kafka.connect.s3.json.ChunkDescriptor;
 import com.spredfast.kafka.connect.s3.json.ChunksIndex;
-import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.Reader;
-import java.util.TimeZone;
+import java.util.function.Consumer;
 import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 /**
  * S3Writer provides necessary operations over S3 to store files and retrieve Last commit offsets
@@ -33,38 +27,21 @@ import org.slf4j.LoggerFactory;
  */
 public class S3Writer {
   private static final Logger log = LoggerFactory.getLogger(S3SinkTask.class);
-  private static final TimeZone UTC = TimeZone.getTimeZone("UTC");
   private final ObjectReader reader = new ObjectMapper().readerFor(ChunksIndex.class);
-  private String keyPrefix;
-  private String bucket;
+  private final String keyPrefix;
+  private final String bucket;
   private final Layout.Builder layoutBuilder;
-  private AmazonS3 s3Client;
-  private TransferManager tm;
+  private final S3Client s3Client;
 
   public S3Writer(
-      String bucket, String keyPrefix, Layout.Builder layoutBuilder, AmazonS3 s3Client) {
-    this(
-        bucket,
-        keyPrefix,
-        layoutBuilder,
-        s3Client,
-        TransferManagerBuilder.standard().withS3Client(s3Client).build());
-  }
-
-  public S3Writer(
-      String bucket,
-      String keyPrefix,
-      Layout.Builder layoutBuilder,
-      AmazonS3 s3Client,
-      TransferManager tm) {
-    if (keyPrefix.length() > 0 && !keyPrefix.endsWith("/")) {
+      String bucket, String keyPrefix, Layout.Builder layoutBuilder, S3Client s3Client) {
+    if (!keyPrefix.isEmpty() && !keyPrefix.endsWith("/")) {
       keyPrefix += "/";
     }
     this.keyPrefix = keyPrefix;
     this.bucket = bucket;
     this.layoutBuilder = layoutBuilder;
     this.s3Client = s3Client;
-    this.tm = tm;
   }
 
   public void putChunk(File dataFile, File indexFile, BlockMetadata metadata) throws IOException {
@@ -78,11 +55,9 @@ public class S3Writer {
     final String indexObjectKey = baseKey + ".index.json";
 
     try {
-      Upload upload = tm.upload(this.bucket, dataObjectKey, dataFile);
-      upload.waitForCompletion();
+      s3Client.putObject(putKey(dataObjectKey), dataFile.toPath());
       log.debug("uploaded {} object to s3", dataObjectKey);
-      upload = tm.upload(this.bucket, indexObjectKey, indexFile);
-      upload.waitForCompletion();
+      s3Client.putObject(putKey(indexObjectKey), indexFile.toPath());
       log.debug("uploaded {} object to s3", indexObjectKey);
     } catch (Exception e) {
       throw new IOException("Failed to upload to S3", e);
@@ -92,63 +67,52 @@ public class S3Writer {
   }
 
   public long fetchOffset(TopicPartition tp) throws IOException {
-
     // See if cursor file exists
     String indexFileKey;
+    String cursorFileKey = getCursorFileKey(tp);
 
-    try (S3Object cursorObj =
-            s3Client.getObject(this.bucket, this.getTopicPartitionLastIndexFileKey(tp));
-        InputStreamReader input = new InputStreamReader(cursorObj.getObjectContent(), "UTF-8"); ) {
-      StringBuilder sb = new StringBuilder(1024);
-      final char[] buffer = new char[1024];
-
-      for (int read = input.read(buffer, 0, buffer.length);
-          read != -1;
-          read = input.read(buffer, 0, buffer.length)) {
-        sb.append(buffer, 0, read);
-      }
-      indexFileKey = sb.toString();
-    } catch (AmazonS3Exception ase) {
-      if (ase.getStatusCode() == 404) {
-        // Topic partition has no data in S3, start from beginning
-        return 0;
-      } else {
-        throw new IOException("Failed to fetch cursor file", ase);
-      }
+    try {
+      indexFileKey = s3Client.getObjectAsBytes(getKey(cursorFileKey)).asUtf8String();
+    } catch (NoSuchKeyException e) {
+      // Topic partition has no data in S3, start from beginning
+      return 0;
     } catch (Exception e) {
       throw new IOException("Failed to fetch or read cursor file", e);
     }
 
     // Now fetch last written index file...
-    try (S3Object indexObj = s3Client.getObject(this.bucket, indexFileKey);
-        InputStreamReader isr = new InputStreamReader(indexObj.getObjectContent(), "UTF-8"); ) {
-      return getNextOffsetFromIndexFileContents(isr);
+    try {
+      byte[] indexJSON = s3Client.getObjectAsBytes(getKey(indexFileKey)).asByteArray();
+      return getNextOffsetFromIndexFileContents(indexJSON);
     } catch (Exception e) {
       throw new IOException("Failed to fetch or parse last index file", e);
     }
   }
 
-  private long getNextOffsetFromIndexFileContents(Reader indexJSON) throws IOException {
+  private long getNextOffsetFromIndexFileContents(byte[] indexJSON) throws IOException {
     ChunksIndex index = reader.readValue(indexJSON);
     ChunkDescriptor lastChunk = index.chunks.get(index.chunks.size() - 1);
     return lastChunk.first_record_offset + lastChunk.num_records;
   }
 
-  private String getTopicPartitionLastIndexFileKey(TopicPartition tp) {
+  private String getCursorFileKey(TopicPartition tp) {
     return keyPrefix + layoutBuilder.buildIndexPath(tp);
   }
 
   private void updateCursorFile(String lastIndexFileKey, TopicPartition tp) throws IOException {
+    String cursorFileKey = getCursorFileKey(tp);
     try {
-      byte[] contentAsBytes = lastIndexFileKey.getBytes("UTF-8");
-      ByteArrayInputStream contentsAsStream = new ByteArrayInputStream(contentAsBytes);
-      ObjectMetadata md = new ObjectMetadata();
-      md.setContentLength(contentAsBytes.length);
-      s3Client.putObject(
-          new PutObjectRequest(
-              this.bucket, this.getTopicPartitionLastIndexFileKey(tp), contentsAsStream, md));
+      s3Client.putObject(putKey(cursorFileKey), RequestBody.fromString(lastIndexFileKey));
     } catch (Exception ex) {
       throw new IOException("Failed to update cursor file", ex);
     }
+  }
+
+  private Consumer<PutObjectRequest.Builder> putKey(String key) {
+    return builder -> builder.bucket(bucket).key(key);
+  }
+
+  private Consumer<GetObjectRequest.Builder> getKey(String key) {
+    return builder -> builder.bucket(bucket).key(key);
   }
 }
