@@ -2,34 +2,34 @@ package com.spredfast.kafka.connect.s3;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.Mockito.any;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.eq;
-import static org.mockito.Mockito.isA;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.model.AmazonS3Exception;
-import com.amazonaws.services.s3.model.PutObjectRequest;
-import com.amazonaws.services.s3.model.S3Object;
-import com.amazonaws.services.s3.transfer.TransferManager;
-import com.amazonaws.services.s3.transfer.Upload;
 import com.spredfast.kafka.connect.s3.sink.BlockGZIPFileWriter;
 import com.spredfast.kafka.connect.s3.sink.S3Writer;
-import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
+import software.amazon.awssdk.core.ResponseBytes;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 /**
  * Really basic sanity check testing over the documented use of API. I've not bothered to properly
@@ -68,49 +68,45 @@ public class S3WriterTest {
   static class ExpectedRequestParams {
     public String key;
     public String bucket;
+    public String content;
 
     public ExpectedRequestParams(String k, String b) {
+      this(k, b, null);
+    }
+
+    public ExpectedRequestParams(String k, String b, String content) {
       key = k;
       bucket = b;
+      this.content = content;
     }
   }
 
-  private void verifyTMUpload(TransferManager mock, ExpectedRequestParams[] expect) {
-    ArgumentCaptor<String> bucketCaptor = ArgumentCaptor.forClass(String.class);
-    ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
-    verify(mock, times(expect.length))
-        .upload(bucketCaptor.capture(), keyCaptor.capture(), any(File.class));
+  private void verifyStringPut(S3Client mock, ExpectedRequestParams[] expected) throws Exception {
+    ArgumentCaptor<PutObjectRequest> requestArgumentCaptor =
+        ArgumentCaptor.forClass(PutObjectRequest.class);
+    ArgumentCaptor<RequestBody> requestBodyArgumentCaptor =
+        ArgumentCaptor.forClass(RequestBody.class);
+    verify(mock, times(expected.length))
+        .putObject(requestArgumentCaptor.capture(), requestBodyArgumentCaptor.capture());
 
-    List<String> bucketArgs = bucketCaptor.getAllValues();
-    List<String> keyArgs = keyCaptor.getAllValues();
+    List<PutObjectRequest> requests = requestArgumentCaptor.getAllValues();
+    List<RequestBody> bodies = requestBodyArgumentCaptor.getAllValues();
 
-    for (ExpectedRequestParams expectedRequestParams : expect) {
-      assertEquals(expectedRequestParams.bucket, bucketArgs.remove(0));
-      assertEquals(expectedRequestParams.key, keyArgs.remove(0));
-    }
-  }
+    for (ExpectedRequestParams e : expected) {
+      PutObjectRequest req = requests.remove(0);
+      RequestBody body = bodies.remove(0);
 
-  private void verifyStringPut(AmazonS3 mock, String key, String content) throws Exception {
-    ArgumentCaptor<PutObjectRequest> argument = ArgumentCaptor.forClass(PutObjectRequest.class);
-    verify(mock).putObject(argument.capture());
+      assertEquals(e.bucket, req.bucket());
+      assertEquals(e.key, req.key());
 
-    PutObjectRequest req = argument.getValue();
-    assertEquals(key, req.getKey());
-    assertEquals(this.testBucket, req.getBucketName());
-
-    InputStreamReader input = new InputStreamReader(req.getInputStream(), StandardCharsets.UTF_8);
-    StringBuilder sb = new StringBuilder(1024);
-    final char[] buffer = new char[1024];
-    try {
-      for (int read = input.read(buffer, 0, buffer.length);
-          read != -1;
-          read = input.read(buffer, 0, buffer.length)) {
-        sb.append(buffer, 0, read);
+      if (e.content != null) {
+        ByteArrayOutputStream content = new ByteArrayOutputStream();
+        try (InputStream in = body.contentStreamProvider().newStream()) {
+          in.transferTo(content);
+        }
+        assertEquals(e.content, content.toString(StandardCharsets.UTF_8));
       }
-    } catch (IOException ignore) {
     }
-
-    assertEquals(content, sb.toString());
   }
 
   private String getKeyForFilename(
@@ -141,46 +137,34 @@ public class S3WriterTest {
   }
 
   private void testUpload(Layout layout) throws Exception {
-    AmazonS3 s3Mock = mock(AmazonS3.class);
-    Layout.Builder layoutBuilder = layout.getBuilder();
-    TransferManager tmMock = mock(TransferManager.class);
-    try (BlockGZIPFileWriter fileWriter = createDummyFiles(0, 1000)) {
-      S3Writer s3Writer = new S3Writer(testBucket, "pfx", layoutBuilder, s3Mock, tmMock);
-      TopicPartition tp = new TopicPartition("bar", 0);
+    S3Client s3Mock = mock(S3Client.class);
+    when(s3Mock.putObject(any(Consumer.class), any(Path.class))).thenCallRealMethod();
+    when(s3Mock.putObject(any(Consumer.class), any(RequestBody.class))).thenCallRealMethod();
+    when(s3Mock.putObject(any(PutObjectRequest.class), any(Path.class))).thenCallRealMethod();
 
-      Upload mockUpload = mock(Upload.class);
+    Layout.Builder layoutBuilder = layout.getBuilder();
+    try (BlockGZIPFileWriter fileWriter = createDummyFiles(0, 1000)) {
+      S3Writer s3Writer = new S3Writer(testBucket, "pfx", layoutBuilder, s3Mock);
+      TopicPartition tp = new TopicPartition("bar", 0);
 
       String dataKey = getKeyForFilename(layoutBuilder, "pfx", "bar", 0, 0, ".gz");
       String indexKey = getKeyForFilename(layoutBuilder, "pfx", "bar", 0, 0, ".index.json");
-
-      when(tmMock.upload(eq(testBucket), eq(dataKey), isA(File.class))).thenReturn(mockUpload);
-      when(tmMock.upload(eq(testBucket), eq(indexKey), isA(File.class))).thenReturn(mockUpload);
 
       s3Writer.putChunk(
           fileWriter.getDataFile(),
           fileWriter.getIndexFile(),
           new BlockMetadata(tp, fileWriter.getStartOffset()));
 
-      verifyTMUpload(
-          tmMock,
+      // Verify it wrote data and index files as well as the cursor file with index key as the
+      // content
+      verifyStringPut(
+          s3Mock,
           new ExpectedRequestParams[] {
             new ExpectedRequestParams(dataKey, testBucket),
-            new ExpectedRequestParams(indexKey, testBucket)
+            new ExpectedRequestParams(indexKey, testBucket),
+            new ExpectedRequestParams(getKeyForIndex(layoutBuilder, "bar"), testBucket, indexKey)
           });
-
-      // Verify it also wrote the index file key
-      verifyStringPut(s3Mock, getKeyForIndex(layoutBuilder, "bar"), indexKey);
     }
-  }
-
-  private S3Object makeMockS3Object(String key, String contents) throws Exception {
-    S3Object mock = new S3Object();
-    mock.setBucketName(this.testBucket);
-    mock.setKey(key);
-    InputStream stream = new ByteArrayInputStream(contents.getBytes(StandardCharsets.UTF_8));
-    mock.setObjectContent(stream);
-    System.out.println("MADE MOCK FOR " + key + " WITH BODY: " + contents);
-    return mock;
   }
 
   @Test
@@ -194,22 +178,23 @@ public class S3WriterTest {
   }
 
   private void testFetchOffsetNewTopic(Layout layout) throws Exception {
-    AmazonS3 s3Mock = mock(AmazonS3.class);
+    S3Client s3Mock = mock(S3Client.class);
+    when(s3Mock.getObjectAsBytes(any(Consumer.class))).thenCallRealMethod();
+
     Layout.Builder layoutBuilder = layout.getBuilder();
     S3Writer s3Writer = new S3Writer(testBucket, "pfx", layoutBuilder, s3Mock);
 
+    GetObjectRequest expectedRequest = getObjectRequest(getKeyForIndex(layoutBuilder, "new_topic"));
+
     // Non existing topic should return 0 offset
-    // Since the file won't exist. code will expect the initial fetch to 404
-    AmazonS3Exception ase = new AmazonS3Exception("The specified key does not exist.");
-    ase.setStatusCode(404);
-    when(s3Mock.getObject(eq(testBucket), eq(getKeyForIndex(layoutBuilder, "new_topic"))))
-        .thenThrow(ase)
-        .thenReturn(null);
+    // Since the file won't exist code will expect NoSuchKeyException to be thrown
+    when(s3Mock.getObjectAsBytes(eq(expectedRequest)))
+        .thenThrow(NoSuchKeyException.builder().build());
 
     TopicPartition tp = new TopicPartition("new_topic", 0);
     long offset = s3Writer.fetchOffset(tp);
     assertEquals(0, offset);
-    verify(s3Mock).getObject(eq(testBucket), eq(getKeyForIndex(layoutBuilder, "new_topic")));
+    verify(s3Mock, times(1)).getObjectAsBytes(eq(expectedRequest));
   }
 
   @Test
@@ -223,7 +208,9 @@ public class S3WriterTest {
   }
 
   private void testFetchOffsetExistingTopic(Layout layout) throws Exception {
-    AmazonS3 s3Mock = mock(AmazonS3.class);
+    S3Client s3Mock = mock(S3Client.class);
+    when(s3Mock.getObjectAsBytes(any(Consumer.class))).thenCallRealMethod();
+
     Layout.Builder layoutBuilder = layout.getBuilder();
     S3Writer s3Writer = new S3Writer(testBucket, "pfx", layoutBuilder, s3Mock);
     // Existing topic should return correct offset
@@ -231,26 +218,35 @@ public class S3WriterTest {
     // and second for the index file itself
     String indexKey = getKeyForFilename(layoutBuilder, "pfx", "bar", 0, 10042, ".index.json");
 
-    when(s3Mock.getObject(eq(testBucket), eq(getKeyForIndex(layoutBuilder, "bar"))))
-        .thenReturn(makeMockS3Object(getKeyForIndex(layoutBuilder, "bar"), indexKey));
+    String barKey = getKeyForIndex(layoutBuilder, "bar");
 
-    when(s3Mock.getObject(eq(testBucket), eq(indexKey)))
+    when(s3Mock.getObjectAsBytes(eq(getObjectRequest(barKey))))
         .thenReturn(
-            makeMockS3Object(
-                indexKey,
-                "{\"chunks\":["
-                    // Assume 10 byte records, split into 3 chunks for same of checking the logic
-                    // about next offset
-                    // We expect next offset to be 12031 + 34
-                    + "{\"first_record_offset\":10042,\"num_records\":1000,\"byte_offset\":0,\"byte_length\":10000},"
-                    + "{\"first_record_offset\":11042,\"num_records\":989,\"byte_offset\":10000,\"byte_length\":9890},"
-                    + "{\"first_record_offset\":12031,\"num_records\":34,\"byte_offset\":19890,\"byte_length\":340}"
-                    + "]}"));
+            ResponseBytes.fromByteArray(GetObjectResponse.builder().build(), indexKey.getBytes()));
+
+    String indexContent =
+        "{\"chunks\":["
+            // Assume 10 byte records, split into 3 chunks for same of checking the logic
+            // about next offset
+            // We expect next offset to be 12031 + 34
+            + "{\"first_record_offset\":10042,\"num_records\":1000,\"byte_offset\":0,\"byte_length\":10000},"
+            + "{\"first_record_offset\":11042,\"num_records\":989,\"byte_offset\":10000,\"byte_length\":9890},"
+            + "{\"first_record_offset\":12031,\"num_records\":34,\"byte_offset\":19890,\"byte_length\":340}"
+            + "]}";
+
+    when(s3Mock.getObjectAsBytes(eq(getObjectRequest(indexKey))))
+        .thenReturn(
+            ResponseBytes.fromByteArray(
+                GetObjectResponse.builder().build(), indexContent.getBytes()));
 
     TopicPartition tp = new TopicPartition("bar", 0);
     long offset = s3Writer.fetchOffset(tp);
     assertEquals(12031 + 34, offset);
-    verify(s3Mock).getObject(eq(testBucket), eq(getKeyForIndex(layoutBuilder, "bar")));
-    verify(s3Mock).getObject(eq(testBucket), eq(indexKey));
+    verify(s3Mock).getObjectAsBytes(eq(getObjectRequest(barKey)));
+    verify(s3Mock).getObjectAsBytes(eq(getObjectRequest(indexKey)));
+  }
+
+  private GetObjectRequest getObjectRequest(String key) {
+    return GetObjectRequest.builder().bucket(testBucket).key(key).build();
   }
 }

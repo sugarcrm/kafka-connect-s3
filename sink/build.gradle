@@ -27,7 +27,7 @@ dependencies {
     implementation project(':common')
 	testImplementation("junit:junit")
 	testImplementation("org.awaitility:awaitility:4.2.0")
-	testImplementation("org.mockito:mockito-core:4.9.0")
+	testImplementation("org.mockito:mockito-core")
 	testImplementation("io.debezium:debezium-testing-testcontainers")
 	testImplementation("net.mguenther.kafka:kafka-junit")
 	testImplementation("org.testcontainers:kafka")

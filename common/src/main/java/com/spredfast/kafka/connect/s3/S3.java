@@ -1,15 +1,16 @@
 package com.spredfast.kafka.connect.s3;
 
-import com.amazonaws.client.builder.AwsClientBuilder.EndpointConfiguration;
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3ClientBuilder;
+import java.net.URI;
 import java.util.Map;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3ClientBuilder;
 
 public class S3 {
 
-  public static AmazonS3 s3client(Map<String, String> config) {
+  public static S3Client s3client(Map<String, String> config) {
 
-    AmazonS3ClientBuilder builder = AmazonS3ClientBuilder.standard();
+    S3ClientBuilder builder = S3Client.builder();
 
     String s3Region = config.get("s3.region");
     String s3Endpoint = config.get("s3.endpoint");
@@ -19,14 +20,15 @@ public class S3 {
       if (s3Region == null) {
         throw new IllegalArgumentException("s3.region must be set if s3.endpoint is set");
       }
-
-      builder = builder.withEndpointConfiguration(new EndpointConfiguration(s3Endpoint, s3Region));
-    } else if (s3Region != null) {
-      builder = builder.withRegion(s3Region);
+      builder = builder.endpointOverride(URI.create(s3Endpoint));
     }
 
-    boolean s3PathStyle = Boolean.parseBoolean(config.get("s3.path_style"));
+    if (s3Region != null) {
+      builder = builder.region(Region.of(s3Region));
+    }
 
-    return builder.withPathStyleAccessEnabled(s3PathStyle).build();
+    builder = builder.forcePathStyle(Boolean.parseBoolean(config.get("s3.path_style")));
+
+    return builder.build();
   }
 }

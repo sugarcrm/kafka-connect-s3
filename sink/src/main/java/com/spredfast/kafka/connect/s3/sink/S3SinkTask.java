@@ -4,7 +4,6 @@ import static java.util.Optional.ofNullable;
 import static java.util.stream.Collectors.groupingBy;
 import static java.util.stream.Collectors.toList;
 
-import com.amazonaws.services.s3.AmazonS3;
 import com.spredfast.kafka.connect.s3.AlreadyBytesConverter;
 import com.spredfast.kafka.connect.s3.BlockMetadata;
 import com.spredfast.kafka.connect.s3.Configure;
@@ -33,6 +32,7 @@ import org.apache.kafka.connect.sink.SinkTask;
 import org.apache.kafka.connect.storage.Converter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.services.s3.S3Client;
 
 public class S3SinkTask extends SinkTask {
 
@@ -102,7 +102,7 @@ public class S3SinkTask extends SinkTask {
             .filter(s -> !s.isEmpty())
             .orElseThrow(() -> new ConnectException("S3 bucket must be configured"));
     String prefix = configGet("s3.prefix").orElse("");
-    AmazonS3 s3Client = S3.s3client(config);
+    S3Client s3Client = S3.s3client(config);
 
     Layout layout = Configure.createLayout(props);
 

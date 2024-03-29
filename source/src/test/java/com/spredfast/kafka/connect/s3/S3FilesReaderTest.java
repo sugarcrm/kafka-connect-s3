@@ -3,20 +3,10 @@ package com.spredfast.kafka.connect.s3;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
-import com.amazonaws.AmazonServiceException;
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3Client;
-import com.amazonaws.services.s3.model.GetObjectRequest;
-import com.amazonaws.services.s3.model.ListNextBatchOfObjectsRequest;
-import com.amazonaws.services.s3.model.ListObjectsRequest;
-import com.amazonaws.services.s3.model.ObjectListing;
-import com.amazonaws.services.s3.model.S3Object;
-import com.amazonaws.services.s3.model.S3ObjectInputStream;
-import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.spredfast.kafka.connect.s3.sink.BlockGZIPFileWriter;
 import com.spredfast.kafka.connect.s3.source.S3FilesReader;
 import com.spredfast.kafka.connect.s3.source.S3Offset;
@@ -34,19 +24,25 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.Test;
-import org.mockito.internal.util.reflection.FieldSetter;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
+import software.amazon.awssdk.services.s3.model.S3Object;
 
 /** Covers S3 and reading raw byte records. Closer to an integration test. */
 public class S3FilesReaderTest {
@@ -66,7 +62,7 @@ public class S3FilesReaderTest {
     final Path dir = Files.createTempDirectory("s3FilesReaderTest");
     givenSomeData(dir, layout.getBuilder());
 
-    final AmazonS3 client = givenAMockS3Client(dir);
+    final S3Client client = givenAMockS3Client(dir);
 
     List<String> results = whenTheRecordsAreRead(client, layout, true, 3);
 
@@ -87,7 +83,7 @@ public class S3FilesReaderTest {
     final Path dir = Files.createTempDirectory("s3FilesReaderTest");
     givenSomeData(dir, layout.getBuilder());
 
-    final AmazonS3 client = givenAMockS3Client(dir);
+    final S3Client client = givenAMockS3Client(dir);
 
     List<String> results = whenTheRecordsAreRead(client, layout, Arrays.asList("1-0", "ololo"));
     assertEquals(Arrays.asList("key0-0=value0-0", "key1-1=value1-1"), results);
@@ -112,7 +108,7 @@ public class S3FilesReaderTest {
     final Path dir = Files.createTempDirectory("s3FilesReaderTest");
     givenASingleDayWithManyPartitions(dir, layout.getBuilder());
 
-    final AmazonS3 client = givenAMockS3Client(dir);
+    final S3Client client = givenAMockS3Client(dir);
 
     List<String> results = whenTheRecordsAreRead(client, layout, true, 10);
 
@@ -136,7 +132,7 @@ public class S3FilesReaderTest {
     final Path dir = Files.createTempDirectory("s3FilesReaderTest");
     givenSomeData(dir, layout.getBuilder());
 
-    final AmazonS3 client = givenAMockS3Client(dir);
+    final S3Client client = givenAMockS3Client(dir);
 
     List<String> results =
         whenTheRecordsAreRead(
@@ -175,7 +171,7 @@ public class S3FilesReaderTest {
     final Path dir = Files.createTempDirectory("s3FilesReaderTest");
     givenSomeData(dir, layout.getBuilder());
 
-    final AmazonS3 client = givenAMockS3Client(dir);
+    final S3Client client = givenAMockS3Client(dir);
 
     // this file will be skipped
     List<String> results =
@@ -203,7 +199,7 @@ public class S3FilesReaderTest {
   }
 
   private S3FilesReader givenAReaderWithOffsets(
-      AmazonS3 client,
+      S3Client client,
       Layout.Parser layoutParser,
       String marker,
       long nextOffset,
@@ -242,7 +238,7 @@ public class S3FilesReaderTest {
     final Path dir = Files.createTempDirectory("s3FilesReaderTest");
     givenSomeData(dir, layout.getBuilder(), false);
 
-    final AmazonS3 client = givenAMockS3Client(dir);
+    final S3Client client = givenAMockS3Client(dir);
 
     List<String> results = whenTheRecordsAreRead(client, layout, false);
 
@@ -260,12 +256,12 @@ public class S3FilesReaderTest {
   }
 
   private List<String> whenTheRecordsAreRead(
-      AmazonS3 client, Layout layout, boolean fileIncludesKeys) {
+      S3Client client, Layout layout, boolean fileIncludesKeys) {
     return whenTheRecordsAreRead(client, layout, fileIncludesKeys, 1);
   }
 
   private List<String> whenTheRecordsAreRead(
-      AmazonS3 client, Layout layout, List<String> messageKeyExcludeList) {
+      S3Client client, Layout layout, List<String> messageKeyExcludeList) {
     S3SourceConfig config =
         new S3SourceConfig(
             "bucket",
@@ -282,7 +278,7 @@ public class S3FilesReaderTest {
   }
 
   private List<String> whenTheRecordsAreRead(
-      AmazonS3 client, Layout layout, boolean fileIncludesKeys, int pageSize) {
+      S3Client client, Layout layout, boolean fileIncludesKeys, int pageSize) {
     S3FilesReader reader =
         new S3FilesReader(
             new S3SourceConfig(
@@ -317,28 +313,21 @@ public class S3FilesReaderTest {
     return results;
   }
 
-  private AmazonS3 givenAMockS3Client(final Path dir) throws NoSuchFieldException {
-    final AmazonS3 client = mock(AmazonS3Client.class);
-    // The aws-java-sdk v1.11+ calls a protected method beforeClientExecution that causes an
-    // exception
-    // due to the requestHandler2s member variable of an abstract super class being null when
-    // mocked.
-    // Since we aren't testing beforeClientExecution, default the member to an empty list to allow
-    // the
-    // test to proceed.
-    FieldSetter.setField(
-        client,
-        AmazonS3Client.class.getSuperclass().getDeclaredField("requestHandler2s"),
-        Collections.emptyList());
+  private S3Client givenAMockS3Client(final Path dir) throws NoSuchFieldException {
+    final S3Client client = mock(S3Client.class, withSettings().verboseLogging());
 
-    when(client.listObjects(any(ListObjectsRequest.class)))
+    when(client.listObjectsV2(any(Consumer.class))).thenCallRealMethod();
+    when(client.getObject(any(Consumer.class))).thenCallRealMethod();
+
+    when(client.listObjectsV2(any(ListObjectsV2Request.class)))
         .thenAnswer(
-            new Answer<ObjectListing>() {
+            new Answer<ListObjectsV2Response>() {
               @Override
-              public ObjectListing answer(InvocationOnMock invocationOnMock) throws Throwable {
-                final ListObjectsRequest req =
-                    (ListObjectsRequest) invocationOnMock.getArguments()[0];
-                ObjectListing listing = new ObjectListing();
+              public ListObjectsV2Response answer(InvocationOnMock invocationOnMock)
+                  throws Throwable {
+                final ListObjectsV2Request req =
+                    (ListObjectsV2Request) invocationOnMock.getArguments()[0];
+                ListObjectsV2Response.Builder listing = ListObjectsV2Response.builder();
 
                 final Set<File> files = new TreeSet<>();
                 Files.walkFileTree(
@@ -357,33 +346,39 @@ public class S3FilesReaderTest {
                       public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
                           throws IOException {
                         String key = key(file.toFile());
-                        if (req.getMarker() == null || key.compareTo(req.getMarker()) > 0) {
+                        if (req.continuationToken() != null) {
+                          if (key.compareTo(req.continuationToken()) > 0) {
+                            files.add(file.toFile());
+                          }
+                        } else if (req.startAfter() != null) {
+                          if (key.compareTo(req.startAfter()) > 0) {
+                            files.add(file.toFile());
+                          }
+                        } else {
                           files.add(file.toFile());
                         }
                         return FileVisitResult.CONTINUE;
                       }
                     });
 
-                List<S3ObjectSummary> summaries = new ArrayList<>();
+                List<S3Object> summaries = new ArrayList<>();
                 int count = 0;
                 for (File file : files) {
-                  if (count++ < req.getMaxKeys()) {
-                    S3ObjectSummary summary = new S3ObjectSummary();
+                  if (count++ < req.maxKeys()) {
                     String key = key(file);
-                    summary.setKey(key);
-                    listing.setNextMarker(key);
-                    summaries.add(summary);
+                    listing.nextContinuationToken(key);
+                    summaries.add(S3Object.builder().key(key).build());
                   } else {
                     break;
                   }
                 }
 
-                listing.setMaxKeys(req.getMaxKeys());
+                listing.maxKeys(req.maxKeys());
 
-                listing.getObjectSummaries().addAll(summaries);
-                listing.setTruncated(files.size() > req.getMaxKeys());
+                listing.contents(summaries);
+                listing.isTruncated(files.size() > req.maxKeys());
 
-                return listing;
+                return listing.build();
               }
 
               private String key(File file) {
@@ -391,52 +386,22 @@ public class S3FilesReaderTest {
                     .substring(dir.toAbsolutePath().toString().length() + 1);
               }
             });
-    when(client.listNextBatchOfObjects(any(ObjectListing.class))).thenCallRealMethod();
-    when(client.listNextBatchOfObjects(any(ListNextBatchOfObjectsRequest.class)))
-        .thenCallRealMethod();
 
-    when(client.getObject(anyString(), anyString()))
-        .thenAnswer(
-            new Answer<S3Object>() {
-              @Override
-              public S3Object answer(InvocationOnMock invocationOnMock) throws Throwable {
-                String key = (String) invocationOnMock.getArguments()[1];
-                return getFile(key, dir);
-              }
-            });
     when(client.getObject(any(GetObjectRequest.class)))
         .thenAnswer(
-            new Answer<S3Object>() {
-              @Override
-              public S3Object answer(InvocationOnMock invocationOnMock) throws Throwable {
-                String key = ((GetObjectRequest) invocationOnMock.getArguments()[0]).getKey();
-                return getFile(key, dir);
-              }
-            });
-    when(client.getObjectMetadata(anyString(), anyString()))
-        .thenAnswer(
-            new Answer<S3Object>() {
-              @Override
-              public S3Object answer(InvocationOnMock invocationOnMock) throws Throwable {
-                String key = (String) invocationOnMock.getArguments()[1];
-                if (!new File(dir.toString(), key).exists()) {
-                  AmazonServiceException e = new AmazonServiceException("Nope: " + key);
-                  e.setErrorCode("NoSuchKey");
-                  throw e;
-                }
-                return null;
-              }
-            });
+            (Answer<ResponseInputStream<GetObjectResponse>>)
+                invocationOnMock -> {
+                  String key = invocationOnMock.getArgument(0, GetObjectRequest.class).key();
+                  return getFile(key, dir);
+                });
     return client;
   }
 
-  S3Object getFile(String key, Path dir) throws FileNotFoundException {
-    S3Object obj = mock(S3Object.class);
+  ResponseInputStream<GetObjectResponse> getFile(String key, Path dir)
+      throws FileNotFoundException {
     File file = new File(dir.toString(), key);
-    when(obj.getKey()).thenReturn(key);
-    S3ObjectInputStream stream = new S3ObjectInputStream(new FileInputStream(file), null);
-    when(obj.getObjectContent()).thenReturn(stream);
-    return obj;
+    return new ResponseInputStream<GetObjectResponse>(
+        GetObjectResponse.builder().build(), new FileInputStream(file));
   }
 
   private void givenASingleDayWithManyPartitions(Path dir, Layout.Builder layoutBuilder)

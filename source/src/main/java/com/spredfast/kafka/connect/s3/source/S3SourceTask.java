@@ -4,8 +4,6 @@ import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toMap;
 import static java.util.stream.Collectors.toSet;
 
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.model.AmazonS3Exception;
 import com.spredfast.kafka.connect.s3.AlreadyBytesConverter;
 import com.spredfast.kafka.connect.s3.Configure;
 import com.spredfast.kafka.connect.s3.Constants;
@@ -31,6 +29,8 @@ import org.apache.kafka.connect.source.SourceTask;
 import org.apache.kafka.connect.storage.Converter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.core.exception.RetryableException;
+import software.amazon.awssdk.services.s3.S3Client;
 
 public class S3SourceTask extends SourceTask {
   private static final Logger log = LoggerFactory.getLogger(S3SourceTask.class);
@@ -123,7 +123,7 @@ public class S3SourceTask extends SourceTask {
     s3PollInterval = configGet("s3.new.record.poll.interval").map(Long::parseLong).orElse(10_000L);
     errorBackoff = configGet("s3.error.backoff").map(Long::parseLong).orElse(1000L);
 
-    AmazonS3 client = S3.s3client(taskConfig);
+    S3Client client = S3.s3client(taskConfig);
 
     Layout layout = Configure.createLayout(taskConfig);
 
@@ -165,15 +165,10 @@ public class S3SourceTask extends SourceTask {
     while (!stopped.get()) {
       try {
         return getSourceRecords(results);
-      } catch (AmazonS3Exception e) {
-        if (e.isRetryable()) {
-          log.warn("Retryable error while polling. Will sleep and try again.", e);
-          Thread.sleep(errorBackoff);
-          readFromStoredOffsets();
-        } else {
-          // die
-          throw e;
-        }
+      } catch (RetryableException e) {
+        log.warn("Retryable error while polling. Will sleep and try again.", e);
+        Thread.sleep(errorBackoff);
+        readFromStoredOffsets();
       }
     }
     return results;
