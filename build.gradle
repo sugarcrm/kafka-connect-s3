@@ -1,6 +1,5 @@
 plugins {
 	id "com.diffplug.spotless" version "6.15.0"
-	id "com.github.johnrengelman.shadow" version "7.1.2"
 	id 'com.palantir.git-version' version '0.15.0'
 	id 'idea'
 	id 'java-library'
@@ -53,25 +52,6 @@ allprojects {
 	}
 }
 
-apply plugin: "com.github.johnrengelman.shadow"
-shadowJar {
-	archiveClassifier = null
-	dependencies {
-		// provided in the connect classpath
-		exclude(dependency('org.apache.kafka:connect-api'))
-		exclude(dependency('org.apache.kafka:kafka-clients'))
-		exclude(dependency('net.jpountz.lz4:.*:.*'))
-		exclude(dependency('org.xerial.snappy:.*:.*'))
-		exclude(dependency('org.slf4j:.*:.*'))
-	}
-
-	// for things we directly depend on, repackage so we don't conflict with other connectors
-	relocate 'com.fasterxml', 'com.spredfast.shade.fasterxml'
-	relocate 'org.apache.commons', 'com.spredfast.shade.apache.commons'
-	relocate 'org.apache.http', 'com.spredfast.shade.apache.http'
-	relocate 'org.joda', 'com.spredfast.shade.joda'
-}
-
 dependencies {
 	implementation project(':sink')
 	implementation project(':source')
@@ -103,9 +83,9 @@ ext {
 
 publishing {
 	publications {
-		shadow(MavenPublication) { publication ->
-			project.shadow.component(publication)
-			groupId = 'io.sugarcrm'
+		maven(MavenPublication) {
+			groupId 'io.sugarcrm'
+			artifact jar
 		}
 	}
 
