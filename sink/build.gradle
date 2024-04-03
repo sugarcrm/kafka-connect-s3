@@ -1,24 +1,5 @@
 description = "Kafka Connect Sink that writes to S3"
 
-apply plugin: "com.github.johnrengelman.shadow"
-
-shadowJar {
-	dependencies {
-		// provided in the connect classpath
-		exclude(dependency('org.apache.kafka:connect-api'))
-		exclude(dependency('org.apache.kafka:kafka-clients'))
-		exclude(dependency('net.jpountz.lz4:.*:.*'))
-		exclude(dependency('org.xerial.snappy:.*:.*'))
-		exclude(dependency('org.slf4j:.*:.*'))
-	}
-
-	// for things we directly depend on, repackage so we don't conflict with other connectors
-	relocate 'com.fasterxml', 'com.spredfast.shade.fasterxml'
-	relocate 'org.apache.commons', 'com.spredfast.shade.apache.commons'
-	relocate 'org.apache.http', 'com.spredfast.shade.apache.http'
-	relocate 'org.joda', 'com.spredfast.shade.joda'
-}
-
 configurations {
 	extLibs
 }
@@ -35,7 +16,7 @@ dependencies {
 	testImplementation("ch.qos.logback:logback-core:1.4.5")
 	testImplementation("ch.qos.logback:logback-classic:1.4.5")
 
-	extLibs project(path: ':source', configuration: 'shadow' )
+	extLibs project(path: ':source')
 }
 
 tasks.register('copyLibs', Copy) {
@@ -44,8 +25,6 @@ tasks.register('copyLibs', Copy) {
 	}
 }
 
-tasks.build.dependsOn tasks.shadowJar
-
 test {
 	testLogging {
 		outputs.upToDateWhen {false}
@@ -53,5 +32,4 @@ test {
 	}
 }
 
-tasks.test.dependsOn tasks.shadowJar, tasks.copyLibs
-
+tasks.test.dependsOn tasks.copyLibs
