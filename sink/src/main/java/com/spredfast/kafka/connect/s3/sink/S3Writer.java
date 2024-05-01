@@ -17,6 +17,7 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.S3Exception;
 
 /**
  * S3Writer provides necessary operations over S3 to store files and retrieve Last commit offsets
@@ -55,9 +56,9 @@ public class S3Writer {
     final String indexObjectKey = baseKey + ".index.json";
 
     try {
-      s3Client.putObject(putKey(dataObjectKey), dataFile.toPath());
+      putObject(dataObjectKey, dataFile);
       log.debug("uploaded {} object to s3", dataObjectKey);
-      s3Client.putObject(putKey(indexObjectKey), indexFile.toPath());
+      putObject(indexObjectKey, indexFile);
       log.debug("uploaded {} object to s3", indexObjectKey);
     } catch (Exception e) {
       throw new IOException("Failed to upload to S3", e);
@@ -102,14 +103,37 @@ public class S3Writer {
   private void updateCursorFile(String lastIndexFileKey, TopicPartition tp) throws IOException {
     String cursorFileKey = getCursorFileKey(tp);
     try {
-      s3Client.putObject(putKey(cursorFileKey), RequestBody.fromString(lastIndexFileKey));
+      putObject(cursorFileKey, lastIndexFileKey);
     } catch (Exception ex) {
       throw new IOException("Failed to update cursor file", ex);
     }
   }
 
-  private Consumer<PutObjectRequest.Builder> putKey(String key) {
-    return builder -> builder.bucket(bucket).key(key);
+  private void putObject(String key, File file) {
+    putObject(key, RequestBody.fromFile(file));
+  }
+
+  private void putObject(String key, String content) {
+    putObject(key, RequestBody.fromString(content));
+  }
+
+  private void putObject(String key, RequestBody requestBody) {
+    int attempts = 5;
+
+    while (true) {
+      attempts--;
+      try {
+        s3Client.putObject(b -> b.bucket(bucket).key(key), requestBody);
+      } catch (S3Exception e) {
+        if (e.getMessage().contains("The provided token has expired") && attempts > 0) {
+          log.warn("Retrying failed attempt to upload an object due to AWS token expiration", e);
+          continue;
+        } else {
+          throw e;
+        }
+      }
+      return;
+    }
   }
 
   private Consumer<GetObjectRequest.Builder> getKey(String key) {
