@@ -227,7 +227,6 @@ public class S3SinkTask extends SinkTask {
       this.tp = tp;
       this.firstRecord = firstRecord;
       format = recordFormat.newWriter();
-
       String localBufferDirectory =
           configGet("local.buffer.dir")
               .orElseThrow(() -> new ConnectException("No local buffer directory configured"));
@@ -384,6 +383,7 @@ public class S3SinkTask extends SinkTask {
 
       // here + 1 is required as the committed offset must point the first unprocessed message
       offsetsToCommit.put(tp, new OffsetAndMetadata(lastRecord.kafkaOffset() + 1));
+	  context.requestCommit();
       log.debug(
           "{} updating safe to commit offsets with pair {}:{}",
           name(),
